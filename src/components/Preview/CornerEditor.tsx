@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react'
 import { useScannerStore, type Corners, type Corner } from '../../store/scannerStore'
 import { extractDocument } from '../../lib/scanic'
+import { transformPerspective } from '../../lib/perspective'
 
 const HANDLE_RADIUS = 20
 const HANDLE_INNER = 10
@@ -242,71 +243,68 @@ export const CornerEditor: React.FC<CornerEditorProps> = ({ onClose }) => {
       ])
 
     try {
-      // 1. Guard Crop: Pre-crop the original image to the bounding box of user corners
-      // This prevents WASM from "wandering off" to other detected features.
       const W = capturedFrame.width
       const H = capturedFrame.height
-      const tl_px = { x: activeCorners.topLeft.x * W, y: activeCorners.topLeft.y * H }
-      const tr_px = { x: activeCorners.topRight.x * W, y: activeCorners.topRight.y * H }
-      const br_px = { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H }
-      const bl_px = { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H }
-
-      const minX = Math.floor(Math.max(0, Math.min(tl_px.x, tr_px.x, br_px.x, bl_px.x)))
-      const minY = Math.floor(Math.max(0, Math.min(tl_px.y, tr_px.y, br_px.y, bl_px.y)))
-      const maxX = Math.ceil(Math.min(W, Math.max(tl_px.x, tr_px.x, br_px.x, bl_px.x)))
-      const maxY = Math.ceil(Math.min(H, Math.max(tl_px.y, tr_px.y, br_px.y, bl_px.y)))
-      const guardW = maxX - minX
-      const guardH = maxY - minY
-
-      if (guardW < 50 || guardH < 50) {
-        showToast('Область слишком мала', 'error')
-        setApplying(false)
-        return
-      }
-
-      const guardCanvas = document.createElement('canvas')
-      guardCanvas.width = guardW
-      guardCanvas.height = guardH
-      const guardCtx = guardCanvas.getContext('2d', { willReadFrequently: true })!
-      
-      // Draw the sub-rectangle into the guard canvas
-      const fullSrcCanvas = document.createElement('canvas')
-      fullSrcCanvas.width = W
-      fullSrcCanvas.height = H
-      fullSrcCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
-      guardCtx.drawImage(fullSrcCanvas, minX, minY, guardW, guardH, 0, 0, guardW, guardH)
-
-      // 2. Translate corners to guard canvas space (normalized)
-      const localCorners: Corners = {
-        topLeft: { x: (tl_px.x - minX) / guardW, y: (tl_px.y - minY) / guardH },
-        topRight: { x: (tr_px.x - minX) / guardW, y: (tr_px.y - minY) / guardH },
-        bottomRight: { x: (br_px.x - minX) / guardW, y: (br_px.y - minY) / guardH },
-        bottomLeft: { x: (bl_px.x - minX) / guardW, y: (bl_px.y - minY) / guardH },
-      }
 
       let blob: Blob | null = null
 
       try {
-        console.log('Attempting guard-cropped extraction...')
-        const result = await withTimeout(extractDocument(guardCanvas, localCorners), 6000)
+        console.log('Performing precise JS perspective transform...')
         
-        if (result.success && result.output instanceof HTMLCanvasElement) {
-          console.log('Extraction success:', result.output.width, 'x', result.output.height)
-          blob = await toBlob(result.output, 0.85)
-        } else {
-          console.warn('WASM extraction returned no output, using guard crop directly')
-        }
+        // Use the new homography-based transformer
+        const resultCanvas = await transformPerspective(
+          capturedFrame,
+          {
+            topLeft: { x: activeCorners.topLeft.x * W, y: activeCorners.topLeft.y * H },
+            topRight: { x: activeCorners.topRight.x * W, y: activeCorners.topRight.y * H },
+            bottomRight: { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H },
+            bottomLeft: { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H },
+          }
+        )
+        
+        console.log('Transformation success:', resultCanvas.width, 'x', resultCanvas.height)
+        blob = await toBlob(resultCanvas, 0.85)
+
       } catch (err) {
-        console.warn('WASM extraction failed or timed out:', err)
+        console.warn('JS Transform failed, trying WASM as backup:', err)
+        // Back to WASM if JS fails (unlikely, but safe)
+        try {
+          const sourceCanvas = document.createElement('canvas')
+          sourceCanvas.width = W
+          sourceCanvas.height = H
+          sourceCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+          const result = await withTimeout(extractDocument(sourceCanvas, activeCorners), 5000)
+          if (result.success && result.output instanceof HTMLCanvasElement) {
+            blob = await toBlob(result.output, 0.85)
+          }
+        } catch (innerErr) {
+          console.error('All extraction methods failed:', innerErr)
+        }
       }
 
-      // 3. Fallback to the guard crop itself if WASM fails or returns something weird
+      // 3. Fallback to a simple bounding box crop if everything else fails
       if (!blob) {
         try {
-          console.log('Using native guard crop fallback')
+          console.log('Using simple bounding box crop as last resort')
+          const tl_px = { x: activeCorners.topLeft.x * W, y: activeCorners.topLeft.y * H }
+          const tr_px = { x: activeCorners.topRight.x * W, y: activeCorners.topRight.y * H }
+          const br_px = { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H }
+          const bl_px = { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H }
+          const minX = Math.floor(Math.max(0, Math.min(tl_px.x, tr_px.x, br_px.x, bl_px.x)))
+          const minY = Math.floor(Math.max(0, Math.min(tl_px.y, tr_px.y, br_px.y, bl_px.y)))
+          const maxX = Math.ceil(Math.min(W, Math.max(tl_px.x, tr_px.x, br_px.x, bl_px.x)))
+          const maxY = Math.ceil(Math.min(H, Math.max(tl_px.y, tr_px.y, br_px.y, bl_px.y)))
+          const guardCanvas = document.createElement('canvas')
+          guardCanvas.width = Math.max(32, maxX - minX)
+          guardCanvas.height = Math.max(32, maxY - minY)
+          const fullSrcCanvas = document.createElement('canvas')
+          fullSrcCanvas.width = W
+          fullSrcCanvas.height = H
+          fullSrcCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+          guardCanvas.getContext('2d')!.drawImage(fullSrcCanvas, minX, minY, guardCanvas.width, guardCanvas.height, 0, 0, guardCanvas.width, guardCanvas.height)
           blob = await toBlob(guardCanvas, 0.85)
         } catch (err) {
-          console.error('Native fallbacks failed:', err)
+          console.error('Final native fallback failed:', err)
         }
       }
 
