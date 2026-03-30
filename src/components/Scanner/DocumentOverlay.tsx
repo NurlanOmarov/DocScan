@@ -79,7 +79,14 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
     setCorners(updated)
   }, [corners, width, height, setCorners])
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (draggingRef.current) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId)
+      } catch {
+        // Fallback
+      }
+    }
     draggingRef.current = null
     setIsDraggingCorner(false)
   }, [setIsDraggingCorner])
@@ -201,7 +208,34 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
         ctx.stroke()
       }
     })
-  }, [corners, confidence, width, height])
+
+    // 6. Draw Instruction Hint in Manual Mode
+    if (!autoMode && !draggingRef.current && corners) {
+      ctx.font = '500 16px Inter, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      
+      const hint = 'Перетащите углы'
+      const metrics = ctx.measureText(hint)
+      const padding = 12
+      const bgW = metrics.width + padding * 2
+      const bgH = 32
+      const bgX = width / 2 - bgW / 2
+      const bgY = height / 2 - bgH / 2
+
+      // Hint Background
+      ctx.beginPath()
+      ctx.roundRect(bgX, bgY, bgW, bgH, 16)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'
+      ctx.stroke()
+
+      // Hint Text
+      ctx.fillStyle = 'white'
+      ctx.fillText(hint, width / 2, height / 2)
+    }
+  }, [corners, confidence, width, height, autoMode])
 
   return (
     <canvas

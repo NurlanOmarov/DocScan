@@ -145,10 +145,10 @@ export function useScanner(
   useEffect(() => {
     if (!autoMode && !corners && state === 'scanning') {
       setCorners({
-        topLeft: { x: 0.2, y: 0.25 },
-        topRight: { x: 0.8, y: 0.25 },
-        bottomRight: { x: 0.8, y: 0.75 },
-        bottomLeft: { x: 0.2, y: 0.75 },
+        topLeft: { x: 0.25, y: 0.2 },
+        topRight: { x: 0.75, y: 0.2 },
+        bottomRight: { x: 0.75, y: 0.8 },
+        bottomLeft: { x: 0.25, y: 0.8 },
       })
     }
   }, [autoMode, corners, state, setCorners])
@@ -175,10 +175,10 @@ export function useScanner(
     if (!autoMode) {
       if (!corners) {
         setCorners({
-          topLeft: { x: 0.15, y: 0.2 },
-          topRight: { x: 0.85, y: 0.2 },
-          bottomRight: { x: 0.85, y: 0.8 },
-          bottomLeft: { x: 0.15, y: 0.8 },
+          topLeft: { x: 0.25, y: 0.2 },
+          topRight: { x: 0.75, y: 0.2 },
+          bottomRight: { x: 0.75, y: 0.8 },
+          bottomLeft: { x: 0.25, y: 0.8 },
         })
       }
       setProcessedBlob(null)

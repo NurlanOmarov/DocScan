@@ -19,6 +19,7 @@ export const CornerEditor: React.FC = () => {
     processedBlob,
     setCorners,
     setProcessedBlob,
+    setIsDraggingCorner,
     setState,
     showToast,
   } = useScannerStore()
@@ -155,10 +156,11 @@ export const CornerEditor: React.FC = () => {
       const hit = findHitCorner(pt.x, pt.y)
       if (hit) {
         draggingRef.current = hit
+        setIsDraggingCorner(true)
         ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
       }
     },
-    [getCanvasPoint, findHitCorner]
+    [getCanvasPoint, findHitCorner, setIsDraggingCorner]
   )
 
   const handlePointerMove = useCallback(
@@ -182,9 +184,15 @@ export const CornerEditor: React.FC = () => {
     [corners, setCorners, getCanvasPoint]
   )
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (draggingRef.current) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId)
+      } catch { /* ignore */ }
+    }
     draggingRef.current = null
-  }, [])
+    setIsDraggingCorner(false)
+  }, [setIsDraggingCorner])
 
   const handleApply = useCallback(async () => {
     if (!capturedFrame || !corners) return
@@ -273,7 +281,7 @@ export const CornerEditor: React.FC = () => {
         Перетащите угловые точки для точной настройки
       </p>
 
-      <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+      <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
         <canvas
           ref={canvasRef}
           className="max-w-full max-h-full touch-none cursor-crosshair"
@@ -283,6 +291,15 @@ export const CornerEditor: React.FC = () => {
           onPointerLeave={handlePointerUp}
           style={{ touchAction: 'none' }}
         />
+        
+        {/* Instruction Hint */}
+        {draggingRef.current === null && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+            <div className="bg-black/40 backdrop-blur-sm border border-white/20 text-white px-4 py-2 rounded-full text-sm font-medium shadow-xl">
+              Перетащите углы
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
