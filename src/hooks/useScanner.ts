@@ -169,27 +169,30 @@ export function useScanner(
     }
   }, [autoMode, corners, state, setCorners])
 
-  const doCapture = useCallback(() => {
+  const doCapture = useCallback((currentCorners?: Corners | null) => {
     const video = videoRef.current
     const canvas = offscreenCanvasRef.current
-    if (!video || !canvas) return
+    if (!video || !canvas || video.videoWidth === 0) return
 
     // Capture full resolution frame
     const captureCanvas = document.createElement('canvas')
-    captureCanvas.width = video.videoWidth || CANVAS_WIDTH
-    captureCanvas.height = video.videoHeight || CANVAS_HEIGHT
+    captureCanvas.width = video.videoWidth
+    captureCanvas.height = video.videoHeight
     const ctx = captureCanvas.getContext('2d')
     if (!ctx) return
 
     ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height)
     const imageData = ctx.getImageData(0, 0, captureCanvas.width, captureCanvas.height)
 
+    // Sync corners: prefer passed ones, then store ones
+    const activeCorners = currentCorners || corners
+
     setCapturedFrame(imageData)
     setState('preview')
 
     // If manual mode: don't extract yet, just use current corners or set defaults if none exist
     if (!autoMode) {
-      if (!corners) {
+      if (!activeCorners) {
         setCorners({
           topLeft: { x: 0.25, y: 0.2 },
           topRight: { x: 0.75, y: 0.2 },
@@ -202,8 +205,7 @@ export function useScanner(
     }
 
     // Process extraction (Auto-mode only)
-    // PASS ALREADY FOUND CORNERS to ensure consistency with what user saw on screen
-    extractDocument(captureCanvas, corners || undefined)
+    extractDocument(captureCanvas, activeCorners || undefined)
       .then((result) => {
         if (result.success && result.output instanceof HTMLCanvasElement) {
           result.output.toBlob(
@@ -325,22 +327,24 @@ export function useScanner(
 
         lastValidCornersRef.current = finalCorners
         setCorners(finalCorners)
+
+        // Auto-capture logic
+        if (autoMode && conf === 'high') {
+          stableFramesRef.current += 1
+          if (stableFramesRef.current >= STABLE_FRAMES_REQUIRED && !capturedRef.current) {
+            capturedRef.current = true
+            doCapture(finalCorners)
+          }
+        } else {
+          stableFramesRef.current = 0
+          capturedRef.current = false
+        }
       } else {
         // If detection fails and we're NOT dragging, clear
         if (!isDraggingCorner) {
           lastValidCornersRef.current = null
           setCorners(null)
         }
-      }
-
-      // Auto-capture logic
-      if (autoMode && conf === 'high') {
-        stableFramesRef.current += 1
-        if (stableFramesRef.current >= STABLE_FRAMES_REQUIRED && !capturedRef.current) {
-          capturedRef.current = true
-          doCapture()
-        }
-      } else {
         stableFramesRef.current = 0
         capturedRef.current = false
       }
@@ -396,8 +400,8 @@ export function useScanner(
   const capture = useCallback(() => {
     if (capturedRef.current) return
     capturedRef.current = true
-    doCapture()
-  }, [doCapture])
+    doCapture(corners)
+  }, [doCapture, corners])
 
   return { corners, confidence, capture, isDetecting }
 }

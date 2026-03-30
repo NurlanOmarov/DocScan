@@ -109,6 +109,18 @@ export const CornerEditor: React.FC = () => {
     draw()
   }, [capturedFrame, draw])
 
+  // Initialize default corners if none exist in the editor
+  useEffect(() => {
+    if (!corners && capturedFrame) {
+      setCorners({
+        topLeft: { x: 0.1, y: 0.1 },
+        topRight: { x: 0.9, y: 0.1 },
+        bottomRight: { x: 0.9, y: 0.9 },
+        bottomLeft: { x: 0.1, y: 0.9 },
+      })
+    }
+  }, [corners, capturedFrame, setCorners])
+
   useEffect(() => {
     draw()
   }, [corners, draw])
@@ -195,10 +207,18 @@ export const CornerEditor: React.FC = () => {
   }, [setIsDraggingCorner])
 
   const handleApply = useCallback(async () => {
-    if (!capturedFrame || !corners) return
+    if (!capturedFrame) return
     setApplying(true)
 
     try {
+      // Use provided corners or fallback to full-frame if still null
+      const activeCorners = corners || {
+        topLeft: { x: 0, y: 0 },
+        topRight: { x: 1, y: 0 },
+        bottomRight: { x: 1, y: 1 },
+        bottomLeft: { x: 0, y: 1 },
+      }
+
       // Rebuild canvas with corners for extraction
       const sourceCanvas = document.createElement('canvas')
       sourceCanvas.width = capturedFrame.width
@@ -206,7 +226,7 @@ export const CornerEditor: React.FC = () => {
       const ctx = sourceCanvas.getContext('2d')!
       ctx.putImageData(capturedFrame, 0, 0)
 
-      const result = await extractDocument(sourceCanvas, corners)
+      const result = await extractDocument(sourceCanvas, activeCorners)
 
       if (result.success && result.output instanceof HTMLCanvasElement) {
         result.output.toBlob(
