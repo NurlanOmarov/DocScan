@@ -95,6 +95,7 @@ export async function extractDocument(
   const options: ScanOptions = {
     mode: 'extract',
     output: 'canvas',
+    maxProcessingDimension: 1600,
   }
 
   // If corners are provided, denormalize them and provide in multiple formats for robustness

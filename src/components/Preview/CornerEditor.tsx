@@ -281,7 +281,25 @@ export const CornerEditor: React.FC<CornerEditorProps> = ({ onClose }) => {
       try {
         const result = await withTimeout(extractDocument(sourceCanvas, activeCorners), 8000)
         if (result.success && result.output instanceof HTMLCanvasElement) {
-          blob = await toBlob(result.output, 0.85)
+          // Heuristic check: if result is too small compared to source, it might be a 'fragment' error
+          const outArea = result.output.width * result.output.height
+          const srcArea = sourceCanvas.width * sourceCanvas.height
+          
+          // Calculate expected area based on corners
+          const w1 = Math.hypot(activeCorners.topRight.x - activeCorners.topLeft.x, activeCorners.topRight.y - activeCorners.topLeft.y)
+          const w2 = Math.hypot(activeCorners.bottomRight.x - activeCorners.bottomLeft.x, activeCorners.bottomRight.y - activeCorners.bottomLeft.y)
+          const h1 = Math.hypot(activeCorners.bottomLeft.x - activeCorners.topLeft.x, activeCorners.bottomLeft.y - activeCorners.topLeft.y)
+          const h2 = Math.hypot(activeCorners.bottomRight.x - activeCorners.topRight.x, activeCorners.bottomRight.y - activeCorners.topRight.y)
+          const expectedAreaRatio = ((w1 + w2) / 2) * ((h1 + h2) / 2)
+          const expectedArea = srcArea * expectedAreaRatio
+
+          // If result area is < 50% of expected area, WASM likely made a mistake and found a tiny document inside
+          if (outArea < expectedArea * 0.5) {
+            console.warn('WASM output looks like a fragment, falling back to native crop. Expected area ratio:', expectedAreaRatio)
+            blob = null
+          } else {
+            blob = await toBlob(result.output, 0.85)
+          }
         }
       } catch (err) {
         console.warn('WASM extraction failed or timed out:', err)
