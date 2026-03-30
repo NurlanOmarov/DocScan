@@ -118,8 +118,10 @@ export function useScanner(
 
   // Smoothing and stabilization refs
   const lastValidCornersRef = useRef<Corners | null>(null)
-  const smoothingFactor = 0.4 // 0.4 = 40% new frame, 60% previous (lower = smoother)
-  const MOVEMENT_THRESHOLD = 0.015 // 1.5% screen movement allowed for stability
+  const confidenceBufferRef = useRef<Confidence[]>([])
+  
+  const smoothingFactor = 0.2 // 0.2 = 20% new frame, 80% previous (lower = smoother)
+  const MOVEMENT_THRESHOLD = 0.02 // 2% screen movement allowed for stability
 
   const {
     state,
@@ -271,8 +273,34 @@ export function useScanner(
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const result = await detectDocument(canvas)
 
-      const conf = getConfidence(result)
-      setConfidence(conf)
+      // 1. Raw confidence
+      const rawConf = getConfidence(result)
+      
+      // 2. Confidence Hysteresis (Majority Vote over 5 frames)
+      confidenceBufferRef.current.push(rawConf)
+      if (confidenceBufferRef.current.length > 5) {
+        confidenceBufferRef.current.shift()
+      }
+
+      // Count occurrences of each confidence level in the buffer
+      const counts: Record<Confidence, number> = { none: 0, low: 0, medium: 0, high: 0 }
+      confidenceBufferRef.current.forEach(c => counts[c]++)
+      
+      // We only upgrade/downgrade level if it's the dominant level in the buffer
+      // (Simple majority of 3+ frames out of 5)
+      let stableConf = confidence
+      for (const level of ['high', 'medium', 'low', 'none'] as Confidence[]) {
+        if (counts[level] >= 3) {
+          stableConf = level
+          break
+        }
+      }
+
+      if (stableConf !== confidence) {
+        setConfidence(stableConf)
+      }
+
+      const conf = stableConf
 
       if (result.success && result.corners) {
         const rawCorners: Corners = {
@@ -306,7 +334,7 @@ export function useScanner(
 
           if (dx < MOVEMENT_THRESHOLD && dy < MOVEMENT_THRESHOLD) {
             // Adaptive smoothing: if stable, use MUCH smaller factor (Lock-on)
-            const adaptiveSmoothing = (conf === 'high' && stableFramesRef.current > 5) ? 0.08 : smoothingFactor
+            const adaptiveSmoothing = (conf === 'high' && stableFramesRef.current > 5) ? 0.05 : smoothingFactor
             
             finalCorners = {
               topLeft: lerpPoint(lastValidCornersRef.current.topLeft, rawCorners.topLeft, adaptiveSmoothing),
