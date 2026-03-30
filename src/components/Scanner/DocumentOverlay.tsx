@@ -53,6 +53,12 @@ const CONFIDENCE_FILL: Record<Confidence, string> = {
 }
 
 const TOUCH_THRESHOLD = 35
+const EDGE_THRESHOLD = 30
+
+type DragTarget =
+  | { kind: 'corner'; key: keyof Corners }
+  | { kind: 'edge'; side: 'left' | 'right' | 'top' | 'bottom' }
+  | null
 
 export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
   corners,
@@ -63,10 +69,22 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
   videoHeight,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const draggingRef = useRef<keyof Corners | null>(null)
+  const draggingRef = useRef<DragTarget>(null)
   const { setCorners, setIsDraggingCorner, autoMode } = useScannerStore()
 
   const mapping = getMapping(width, height, videoWidth, videoHeight)
+
+  // Convert normalized video coords → container pixels
+  const toScreen = useCallback((nx: number, ny: number) => ({
+    x: nx * mapping.visibleVideoWidth - mapping.offsetX,
+    y: ny * mapping.visibleVideoHeight - mapping.offsetY,
+  }), [mapping])
+
+  // Convert container pixels → normalized video coords
+  const toNorm = useCallback((x: number, y: number) => ({
+    nx: Math.max(0, Math.min(1, (x + mapping.offsetX) / mapping.visibleVideoWidth)),
+    ny: Math.max(0, Math.min(1, (y + mapping.offsetY) / mapping.visibleVideoHeight)),
+  }), [mapping])
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!corners) return
@@ -76,28 +94,57 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    const keys: (keyof Corners)[] = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']
-    let closestKey: keyof Corners | null = null
+    // 1. Check corners first
+    const cornerKeys: (keyof Corners)[] = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']
+    let closestCorner: keyof Corners | null = null
     let minDist = TOUCH_THRESHOLD
 
-    keys.forEach(key => {
-      // Map normalized video corners to container pixels
-      const cx = corners[key].x * mapping.visibleVideoWidth - mapping.offsetX
-      const cy = corners[key].y * mapping.visibleVideoHeight - mapping.offsetY
-      
-      const dist = Math.hypot(x - cx, y - cy)
+    cornerKeys.forEach(key => {
+      const sc = toScreen(corners[key].x, corners[key].y)
+      const dist = Math.hypot(x - sc.x, y - sc.y)
       if (dist < minDist) {
         minDist = dist
-        closestKey = key
+        closestCorner = key
       }
     })
 
-    if (closestKey) {
-      draggingRef.current = closestKey
+    if (closestCorner) {
+      draggingRef.current = { kind: 'corner', key: closestCorner }
+      setIsDraggingCorner(true)
+      ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+      return
+    }
+
+    // 2. Check edge midpoints
+    const tl = toScreen(corners.topLeft.x, corners.topLeft.y)
+    const tr = toScreen(corners.topRight.x, corners.topRight.y)
+    const br = toScreen(corners.bottomRight.x, corners.bottomRight.y)
+    const bl = toScreen(corners.bottomLeft.x, corners.bottomLeft.y)
+
+    const edgeMids: { side: 'left' | 'right' | 'top' | 'bottom'; mx: number; my: number }[] = [
+      { side: 'top',    mx: (tl.x + tr.x) / 2, my: (tl.y + tr.y) / 2 },
+      { side: 'right',  mx: (tr.x + br.x) / 2, my: (tr.y + br.y) / 2 },
+      { side: 'bottom', mx: (br.x + bl.x) / 2, my: (br.y + bl.y) / 2 },
+      { side: 'left',   mx: (bl.x + tl.x) / 2, my: (bl.y + tl.y) / 2 },
+    ]
+
+    let closestEdge: 'left' | 'right' | 'top' | 'bottom' | null = null
+    let minEdgeDist = EDGE_THRESHOLD
+
+    edgeMids.forEach(({ side, mx, my }) => {
+      const dist = Math.hypot(x - mx, y - my)
+      if (dist < minEdgeDist) {
+        minEdgeDist = dist
+        closestEdge = side
+      }
+    })
+
+    if (closestEdge) {
+      draggingRef.current = { kind: 'edge', side: closestEdge }
       setIsDraggingCorner(true)
       ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     }
-  }, [corners, mapping, setIsDraggingCorner])
+  }, [corners, mapping, toScreen, setIsDraggingCorner])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!draggingRef.current || !corners) return
@@ -106,17 +153,36 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
 
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+    const { nx, ny } = toNorm(x, y)
 
-    // Map container pixels to normalized video coordinates
-    const nx = Math.max(0, Math.min(1, (x + mapping.offsetX) / mapping.visibleVideoWidth))
-    const ny = Math.max(0, Math.min(1, (y + mapping.offsetY) / mapping.visibleVideoHeight))
+    const drag = draggingRef.current
 
-    const updated: Corners = {
-      ...corners,
-      [draggingRef.current]: { x: nx, y: ny }
+    if (drag.kind === 'corner') {
+      setCorners({ ...corners, [drag.key]: { x: nx, y: ny } })
+    } else {
+      // Edge dragging: move both corners of that side
+      const updated = { ...corners }
+      switch (drag.side) {
+        case 'left':
+          updated.topLeft = { x: nx, y: corners.topLeft.y }
+          updated.bottomLeft = { x: nx, y: corners.bottomLeft.y }
+          break
+        case 'right':
+          updated.topRight = { x: nx, y: corners.topRight.y }
+          updated.bottomRight = { x: nx, y: corners.bottomRight.y }
+          break
+        case 'top':
+          updated.topLeft = { x: corners.topLeft.x, y: ny }
+          updated.topRight = { x: corners.topRight.x, y: ny }
+          break
+        case 'bottom':
+          updated.bottomLeft = { x: corners.bottomLeft.x, y: ny }
+          updated.bottomRight = { x: corners.bottomRight.x, y: ny }
+          break
+      }
+      setCorners(updated)
     }
-    setCorners(updated)
-  }, [corners, mapping, setCorners])
+  }, [corners, toNorm, setCorners])
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (draggingRef.current) {
@@ -239,35 +305,63 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
     // 5. Corner Handles (Dots)
     pts.forEach((p, i) => {
       const key = (['topLeft', 'topRight', 'bottomRight', 'bottomLeft'] as (keyof Corners)[])[i]
-      const isDragging = draggingRef.current === key
+      const isDragging = draggingRef.current?.kind === 'corner' && draggingRef.current.key === key
 
       ctx.beginPath()
-      ctx.arc(p.x, p.y, isDragging ? 10 : 8, 0, Math.PI * 2)
+      ctx.arc(p.x, p.y, isDragging ? 12 : 9, 0, Math.PI * 2)
       ctx.fillStyle = isDragging ? '#fff' : color
       ctx.fill()
-      
+
       if (!isDragging) {
         ctx.beginPath()
         ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
         ctx.fillStyle = 'white'
         ctx.fill()
       } else {
-        // Draw crosshair or larger target for active drag
         ctx.strokeStyle = color
         ctx.lineWidth = 2
         ctx.beginPath()
-        ctx.arc(p.x, p.y, 15, 0, Math.PI * 2)
+        ctx.arc(p.x, p.y, 18, 0, Math.PI * 2)
         ctx.stroke()
       }
     })
 
-    // 6. Draw Instruction Hint in Manual Mode
+    // 6. Edge midpoint handles (━)
+    const edgeMids = [
+      { side: 'top',    sx: pts[0].x, sy: pts[0].y, ex: pts[1].x, ey: pts[1].y },
+      { side: 'right',  sx: pts[1].x, sy: pts[1].y, ex: pts[2].x, ey: pts[2].y },
+      { side: 'bottom', sx: pts[2].x, sy: pts[2].y, ex: pts[3].x, ey: pts[3].y },
+      { side: 'left',   sx: pts[3].x, sy: pts[3].y, ex: pts[0].x, ey: pts[0].y },
+    ]
+
+    edgeMids.forEach(({ side, sx, sy, ex, ey }) => {
+      const mx = (sx + ex) / 2
+      const my = (sy + ey) / 2
+      const isEdgeDragging = draggingRef.current?.kind === 'edge' && draggingRef.current.side === side
+      const isVertical = side === 'left' || side === 'right'
+
+      const hw = isVertical ? 4 : 14  // half-width of handle bar
+      const hh = isVertical ? 14 : 4  // half-height of handle bar
+
+      ctx.beginPath()
+      ctx.roundRect(mx - hw, my - hh, hw * 2, hh * 2, 3)
+      ctx.fillStyle = isEdgeDragging ? '#fff' : 'rgba(255,255,255,0.75)'
+      ctx.fill()
+
+      if (isEdgeDragging) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
+        ctx.stroke()
+      }
+    })
+
+    // 7. Draw Instruction Hint in Manual Mode
     if (!autoMode && !draggingRef.current && corners) {
-      ctx.font = '500 16px Inter, sans-serif'
+      ctx.font = '500 15px Inter, sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      
-      const hint = 'Перетащите углы'
+
+      const hint = 'Тяните углы или стороны'
       const metrics = ctx.measureText(hint)
       const padding = 12
       const bgW = metrics.width + padding * 2
@@ -275,15 +369,13 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
       const bgX = width / 2 - bgW / 2
       const bgY = height / 2 - bgH / 2
 
-      // Hint Background
       ctx.beginPath()
       ctx.roundRect(bgX, bgY, bgW, bgH, 16)
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
       ctx.fill()
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'
       ctx.stroke()
 
-      // Hint Text
       ctx.fillStyle = 'white'
       ctx.fillText(hint, width / 2, height / 2)
     }
