@@ -207,7 +207,7 @@ export const CornerEditor: React.FC = () => {
   }, [setIsDraggingCorner])
 
   const handleApply = useCallback(async () => {
-    if (!capturedFrame || applying) return
+    if (!capturedFrame) return
     setApplying(true)
 
     const activeCorners = corners || {
@@ -220,22 +220,68 @@ export const CornerEditor: React.FC = () => {
     const toBlob = (canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> =>
       new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
 
+    // Native canvas crop as reliable fallback (no WASM required)
+    const nativeCrop = (): HTMLCanvasElement => {
+      const W = capturedFrame.width
+      const H = capturedFrame.height
+      const tl = { x: activeCorners.topLeft.x * W, y: activeCorners.topLeft.y * H }
+      const tr = { x: activeCorners.topRight.x * W, y: activeCorners.topRight.y * H }
+      const br = { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H }
+      const bl = { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H }
+
+      const minX = Math.min(tl.x, tr.x, br.x, bl.x)
+      const minY = Math.min(tl.y, tr.y, br.y, bl.y)
+      const maxX = Math.max(tl.x, tr.x, br.x, bl.x)
+      const maxY = Math.max(tl.y, tr.y, br.y, bl.y)
+
+      const cropW = Math.round(maxX - minX)
+      const cropH = Math.round(maxY - minY)
+
+      const srcCanvas = document.createElement('canvas')
+      srcCanvas.width = W
+      srcCanvas.height = H
+      srcCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+
+      const out = document.createElement('canvas')
+      out.width = cropW
+      out.height = cropH
+      out.getContext('2d')!.drawImage(srcCanvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH)
+      return out
+    }
+
     try {
       const sourceCanvas = document.createElement('canvas')
       sourceCanvas.width = capturedFrame.width
       sourceCanvas.height = capturedFrame.height
-      const ctx = sourceCanvas.getContext('2d')!
-      ctx.putImageData(capturedFrame, 0, 0)
+      sourceCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
 
-      const result = await extractDocument(sourceCanvas, activeCorners)
+      // Wrap WASM call with 8-second timeout
+      const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+        Promise.race([
+          p,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('WASM timeout')), ms)
+          ),
+        ])
 
       let blob: Blob | null = null
 
-      if (result.success && result.output instanceof HTMLCanvasElement) {
-        blob = await toBlob(result.output, 0.85)
+      try {
+        const result = await withTimeout(extractDocument(sourceCanvas, activeCorners), 8000)
+        if (result.success && result.output instanceof HTMLCanvasElement) {
+          blob = await toBlob(result.output, 0.85)
+        }
+      } catch {
+        // WASM failed or timed out — use native crop
+        blob = null
       }
 
-      // Fallback to raw frame if extraction failed or blob is null
+      // Fallback to native crop if WASM gave nothing
+      if (!blob) {
+        blob = await toBlob(nativeCrop(), 0.85)
+      }
+
+      // Last resort: full frame
       if (!blob) {
         blob = await toBlob(sourceCanvas, 0.85)
       }
@@ -248,24 +294,10 @@ export const CornerEditor: React.FC = () => {
         setApplying(false)
       }
     } catch {
-      showToast('Ошибка обработки. Используется исходное изображение.', 'warning')
-      try {
-        const fallback = document.createElement('canvas')
-        fallback.width = capturedFrame.width
-        fallback.height = capturedFrame.height
-        fallback.getContext('2d')!.putImageData(capturedFrame, 0, 0)
-        const blob = await toBlob(fallback, 0.85)
-        if (blob) {
-          setProcessedBlob(blob)
-          setState('preview')
-          return
-        }
-      } catch {
-        // ignore
-      }
+      showToast('Ошибка обработки', 'error')
       setApplying(false)
     }
-  }, [capturedFrame, corners, applying, setProcessedBlob, setState, showToast])
+  }, [capturedFrame, corners, setProcessedBlob, setState, showToast])
 
   return (
     <div className="flex flex-col h-full bg-slate-900">
