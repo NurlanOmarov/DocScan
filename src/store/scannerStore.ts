@@ -1,6 +1,40 @@
 import { create } from 'zustand'
 
-export type AppState = 'idle' | 'scanning' | 'captured' | 'preview' | 'uploading' | 'done'
+export type AppState = 'idle' | 'scanning' | 'captured' | 'preview' | 'uploading' | 'done' | 'settings'
+
+export interface ScannerSettings {
+  lowThreshold: number
+  highThreshold: number
+  dilationKernelSize: number
+  epsilon: number
+  smoothingFactor: number
+  movementThreshold: number
+  minAreaRatio: number
+  debugOverlay: boolean
+}
+
+const DEFAULT_SETTINGS: ScannerSettings = {
+  lowThreshold: 25,
+  highThreshold: 75,
+  dilationKernelSize: 7,
+  epsilon: 0.02,
+  smoothingFactor: 0.2,
+  movementThreshold: 0.02,
+  minAreaRatio: 0.08,
+  debugOverlay: false,
+}
+
+const loadSettings = (): ScannerSettings => {
+  try {
+    const saved = localStorage.getItem('docscan_settings')
+    if (saved) {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) }
+    }
+  } catch (e) {
+    console.error('Failed to load settings:', e)
+  }
+  return DEFAULT_SETTINGS
+}
 
 export interface Corner {
   x: number
@@ -40,6 +74,8 @@ interface ScannerStore {
   isDraggingCorner: boolean
   viewerOpen: boolean
   viewerDocIndex: number
+  settings: ScannerSettings
+  debugInfo: any | null
 
   setState: (s: AppState) => void
   setCapturedFrame: (f: ImageData | null) => void
@@ -57,6 +93,9 @@ interface ScannerStore {
   openViewer: (index: number) => void
   closeViewer: () => void
   setViewerDocIndex: (i: number) => void
+  updateScannerSetting: (key: keyof ScannerSettings, value: any) => void
+  resetSettings: () => void
+  setDebugInfo: (info: any | null) => void
 }
 
 export const useScannerStore = create<ScannerStore>()((set) => ({
@@ -72,12 +111,15 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
   isDraggingCorner: false,
   viewerOpen: false,
   viewerDocIndex: 0,
+  settings: loadSettings(),
+  debugInfo: null,
 
   setState: (s) => set({ state: s }),
   setCapturedFrame: (f) => set({ capturedFrame: f }),
   setCorners: (c) => set({ corners: c }),
   setProcessedBlob: (b) => set({ processedBlob: b }),
   setUploadProgress: (p) => set({ uploadProgress: p }),
+  setDebugInfo: (info) => set({ debugInfo: info }),
 
   addDocument: (doc) =>
     set((state) => ({ documents: [doc, ...state.documents] })),
@@ -112,4 +154,15 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
   openViewer: (index) => set({ viewerOpen: true, viewerDocIndex: index }),
   closeViewer: () => set({ viewerOpen: false }),
   setViewerDocIndex: (i) => set({ viewerDocIndex: i }),
+
+  updateScannerSetting: (key, value) => set((state) => {
+    const newSettings = { ...state.settings, [key]: value }
+    localStorage.setItem('docscan_settings', JSON.stringify(newSettings))
+    return { settings: newSettings }
+  }),
+
+  resetSettings: () => set(() => {
+    localStorage.removeItem('docscan_settings')
+    return { settings: DEFAULT_SETTINGS }
+  }),
 }))

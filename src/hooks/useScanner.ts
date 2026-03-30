@@ -84,7 +84,7 @@ function validateGeometry(corners: Corners): { isValid: boolean; score: number }
   return { isValid: true, score: angleScore / 4 }
 }
 
-function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: number): Confidence {
+function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: number, minAreaRatio: number): Confidence {
   if (!result.success || !result.corners) return 'none'
 
   const corners = result.corners as Corners
@@ -104,67 +104,52 @@ function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: nu
   const area = computeContourArea(normCorners) // area in [0..1] space
 
   // Document should occupy significant portion of the frame
-  if (area < 0.08) return 'low'
-  if (area < 0.20 || score < 0.65) return 'medium'
+  if (area < minAreaRatio) return 'low'
+  if (area < minAreaRatio * 2.5 || score < 0.65) return 'medium'
   if (area > 0.92) return 'medium' // Too close, might be cut off
 
   return 'high'
 }
 
-export function useScanner(
-  videoRef: React.RefObject<HTMLVideoElement>
-): UseScannerResult {
+export function useScanner(videoRef: React.RefObject<HTMLVideoElement>): UseScannerResult {
+  const state = useScannerStore((s) => s.state)
+  const setState = useScannerStore((s) => s.setState)
+  const setCorners = useScannerStore((s) => s.setCorners)
+  const corners = useScannerStore((s) => s.corners)
+  const autoMode = useScannerStore((s) => s.autoMode)
+  const setCapturedFrame = useScannerStore((s) => s.setCapturedFrame)
+  const setProcessedBlob = useScannerStore((s) => s.setProcessedBlob)
+  const showToast = useScannerStore((s) => s.showToast)
+  const isDraggingCorner = useScannerStore((s) => s.isDraggingCorner)
+  const settings = useScannerStore((s) => s.settings)
+  const setDebugInfo = useScannerStore((s) => s.setDebugInfo)
+
   const [confidence, setConfidence] = useState<Confidence>('none')
   const [isDetecting, setIsDetecting] = useState(false)
 
   const rafRef = useRef<number>(0)
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const lastDetectionRef = useRef<number>(0)
-  const stableFramesRef = useRef<number>(0)
   const capturedRef = useRef<boolean>(false)
+  const stableFramesRef = useRef<number>(0)
 
   // Smoothing and stabilization refs
   const lastValidCornersRef = useRef<Corners | null>(null)
   const confidenceBufferRef = useRef<Confidence[]>([])
   
-  const smoothingFactor = 0.2 // 0.2 = 20% new frame, 80% previous (lower = smoother)
-  const MOVEMENT_THRESHOLD = 0.02 // 2% screen movement allowed for stability
+  // Dynamic parameters from settings
+  const smoothingFactor = settings.smoothingFactor
+  const MOVEMENT_THRESHOLD = settings.movementThreshold
 
-  const {
-    state,
-    corners,
-    autoMode,
-    setState,
-    setCapturedFrame,
-    setCorners,
-    setProcessedBlob,
-    showToast,
-    isDraggingCorner,
-  } = useScannerStore()
-
-  // Initialize offscreen canvas based on video aspect ratio
+  // Initialize offscreen canvas
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    const handleResize = () => {
-      if (!video.videoWidth || !video.videoHeight) return
-      const canvas = offscreenCanvasRef.current || document.createElement('canvas')
-      const ratio = video.videoWidth / video.videoHeight
-      const targetWidth = CANVAS_WIDTH
-      const targetHeight = Math.round(targetWidth / ratio)
-      
-      canvas.width = targetWidth
-      canvas.height = targetHeight
+    if (!offscreenCanvasRef.current) {
+      const canvas = document.createElement('canvas')
+      canvas.width = CANVAS_WIDTH
+      canvas.height = 600
       offscreenCanvasRef.current = canvas
     }
-
-    if (video.readyState >= 1) {
-      handleResize()
-    }
-    video.addEventListener('loadedmetadata', handleResize)
-    return () => video.removeEventListener('loadedmetadata', handleResize)
-  }, [videoRef])
+  }, [])
 
   // Provide default corners for manual mode if none exist
   useEffect(() => {
@@ -180,82 +165,57 @@ export function useScanner(
 
   const doCapture = useCallback((currentCorners?: Corners | null) => {
     const video = videoRef.current
-    const canvas = offscreenCanvasRef.current
-    if (!video || !canvas || video.videoWidth === 0) return
+    if (!video) return
 
-    // Capture full resolution frame
+    // Create high-res canvas for the actual capture
     const captureCanvas = document.createElement('canvas')
     captureCanvas.width = video.videoWidth
     captureCanvas.height = video.videoHeight
     const ctx = captureCanvas.getContext('2d')
     if (!ctx) return
 
-    ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height)
-    const imageData = ctx.getImageData(0, 0, captureCanvas.width, captureCanvas.height)
+    ctx.drawImage(video, 0, 0)
 
     // Sync corners: prefer passed ones, then store ones
     const activeCorners = currentCorners || corners
 
-    setCapturedFrame(imageData)
-    setState('preview')
-
-    // If manual mode: don't extract yet, just use current corners or set defaults if none exist
-    if (!autoMode) {
-      if (!activeCorners) {
-        setCorners({
-          topLeft: { x: 0.12, y: 0.15 },
-          topRight: { x: 0.88, y: 0.15 },
-          bottomRight: { x: 0.88, y: 0.72 },
-          bottomLeft: { x: 0.12, y: 0.72 },
-        })
-      }
-      setProcessedBlob(null)
-      return
-    }
-
     // Process extraction (Auto-mode only)
     extractDocument(captureCanvas, activeCorners || undefined)
-      .then((result) => {
-        if (result.success && result.output instanceof HTMLCanvasElement) {
-          result.output.toBlob(
+      .then((res) => {
+        if (res.success && res.output instanceof HTMLCanvasElement) {
+          const resultCanvas = res.output
+          const imageData = resultCanvas.getContext('2d')!.getImageData(
+            0, 0, resultCanvas.width, resultCanvas.height
+          )
+          
+          resultCanvas.toBlob(
             (blob) => {
               if (blob) {
-                // Compress if > 2MB
-                if (blob.size > 2 * 1024 * 1024) {
-                  compressBlob(result.output as HTMLCanvasElement, 0.6).then((compressed) => {
-                    setProcessedBlob(compressed)
-                  })
-                } else {
-                  setProcessedBlob(blob)
-                }
+                setCapturedFrame(imageData)
+                setProcessedBlob(blob)
+                setState('preview')
               }
             },
             'image/jpeg',
             0.85
           )
         } else {
-          // Fallback: use captured frame as-is
-          captureCanvas.toBlob(
-            (blob) => {
-              if (blob) setProcessedBlob(blob)
-            },
-            'image/jpeg',
-            0.85
-          )
+          showToast('Ошибка при обработке документа', 'error')
+          setState('idle')
         }
       })
-      .catch(() => {
-        // Extraction failed, use raw frame
-        captureCanvas.toBlob(
-          (blob) => {
-            if (blob) setProcessedBlob(blob)
-          },
-          'image/jpeg',
-          0.85
-        )
-        showToast('Детекция недоступна. Вы можете настроить границы вручную', 'warning')
+      .catch((err) => {
+        console.error('Capture failed:', err)
+        showToast('Произошла ошибка при захвате', 'error')
+        setState('idle')
       })
-  }, [videoRef, autoMode, corners, setCapturedFrame, setState, setCorners, setProcessedBlob, showToast])
+  }, [videoRef, corners, setCapturedFrame, setProcessedBlob, setState, showToast])
+
+  const capture = useCallback(() => {
+    if (capturedRef.current) return
+    capturedRef.current = true
+    doCapture(corners)
+  }, [doCapture, corners])
 
   const processFrame = useCallback(async () => {
     const video = videoRef.current
@@ -277,15 +237,23 @@ export function useScanner(
     }
 
     try {
+      // Adjust canvas height to match video aspect ratio if needed
+      const videoAspect = video.videoHeight / video.videoWidth
+      const targetHeight = Math.floor(CANVAS_WIDTH * videoAspect)
+      if (canvas.height !== targetHeight) {
+        canvas.height = targetHeight
+      }
+
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const result = await detectDocument(canvas)
+      const result = await detectDocument(canvas, settings)
+      setDebugInfo(result.debug)
 
       // Library returns corners in CANVAS pixel space (scaleFactor=1 since input is 800px canvas)
       const origW = canvas.width
       const origH = canvas.height
 
-      // 1. Raw confidence (pass canvas dims for correct area calc)
-      const rawConf = getConfidence(result, origW, origH)
+      // 1. Raw confidence (pass canvas dims and minAreaRatio for correct area calc)
+      const rawConf = getConfidence(result, origW, origH, settings.minAreaRatio)
       
       // 2. Confidence Hysteresis (Majority Vote over 5 frames)
       confidenceBufferRef.current.push(rawConf)
@@ -315,22 +283,10 @@ export function useScanner(
 
       if (result.success && result.corners) {
         const rawCorners: Corners = {
-          topLeft: {
-            x: result.corners.topLeft.x / origW,
-            y: result.corners.topLeft.y / origH,
-          },
-          topRight: {
-            x: result.corners.topRight.x / origW,
-            y: result.corners.topRight.y / origH,
-          },
-          bottomRight: {
-            x: result.corners.bottomRight.x / origW,
-            y: result.corners.bottomRight.y / origH,
-          },
-          bottomLeft: {
-            x: result.corners.bottomLeft.x / origW,
-            y: result.corners.bottomLeft.y / origH,
-          },
+          topLeft: { x: result.corners.topLeft.x / origW, y: result.corners.topLeft.y / origH },
+          topRight: { x: result.corners.topRight.x / origW, y: result.corners.topRight.y / origH },
+          bottomRight: { x: result.corners.bottomRight.x / origW, y: result.corners.bottomRight.y / origH },
+          bottomLeft: { x: result.corners.bottomLeft.x / origW, y: result.corners.bottomLeft.y / origH },
         }
 
         if (isDraggingCorner) return
@@ -350,16 +306,8 @@ export function useScanner(
             finalCorners = {
               topLeft: lerpPoint(lastValidCornersRef.current.topLeft, rawCorners.topLeft, adaptiveSmoothing),
               topRight: lerpPoint(lastValidCornersRef.current.topRight, rawCorners.topRight, adaptiveSmoothing),
-              bottomRight: lerpPoint(
-                lastValidCornersRef.current.bottomRight,
-                rawCorners.bottomRight,
-                adaptiveSmoothing
-              ),
-              bottomLeft: lerpPoint(
-                lastValidCornersRef.current.bottomLeft,
-                rawCorners.bottomLeft,
-                adaptiveSmoothing
-              ),
+              bottomRight: lerpPoint(lastValidCornersRef.current.bottomRight, rawCorners.bottomRight, adaptiveSmoothing),
+              bottomLeft: lerpPoint(lastValidCornersRef.current.bottomLeft, rawCorners.bottomLeft, adaptiveSmoothing),
             }
           }
         }
@@ -390,20 +338,7 @@ export function useScanner(
     } catch {
       // Detection error is non-fatal
     }
-  }, [videoRef, autoMode, doCapture, setCorners, isDraggingCorner, smoothingFactor])
-
-  async function compressBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(
-        (blob) => {
-          if (blob) resolve(blob)
-          else reject(new Error('Compression failed'))
-        },
-        'image/jpeg',
-        quality
-      )
-    })
-  }
+  }, [videoRef, confidence, isDraggingCorner, autoMode, setConfidence, setCorners, doCapture, settings, smoothingFactor, MOVEMENT_THRESHOLD])
 
   // Animation frame loop
   useEffect(() => {
@@ -435,12 +370,6 @@ export function useScanner(
       setIsDetecting(false)
     }
   }, [state, processFrame])
-
-  const capture = useCallback(() => {
-    if (capturedRef.current) return
-    capturedRef.current = true
-    doCapture(corners)
-  }, [doCapture, corners])
 
   return { corners, confidence, capture, isDetecting }
 }

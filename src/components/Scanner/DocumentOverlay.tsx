@@ -245,6 +245,46 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
       return
     }
 
+    // 0. Debug Visualization (Raw and Final Contours from the store)
+    const { settings, debugInfo } = useScannerStore.getState()
+    if (settings.debugOverlay && debugInfo) {
+      // Draw all raw contours in faint red
+      if (debugInfo.rawContours) {
+        ctx.lineWidth = 1
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)' // Red
+        debugInfo.rawContours.forEach((c: any) => {
+          if (!c.points || c.points.length < 3) return
+          ctx.beginPath()
+          const p0 = toScreen(c.points[0].x / 800, c.points[0].y / 600) // Library uses 800px width for processing
+          ctx.moveTo(p0.x, p0.y)
+          for (let i = 1; i < c.points.length; i++) {
+            const p = toScreen(c.points[i].x / 800, c.points[i].y / 600)
+            ctx.lineTo(p.x, p.y)
+          }
+          ctx.closePath()
+          ctx.stroke()
+        })
+      }
+
+      // Draw final filtered contours in faint green
+      if (debugInfo.finalContours) {
+        ctx.lineWidth = 2
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)' // Emerald
+        debugInfo.finalContours.forEach((c: any) => {
+          if (!c.points || c.points.length < 3) return
+          ctx.beginPath()
+          const p0 = toScreen(c.points[0].x / 800, c.points[0].y / 600)
+          ctx.moveTo(p0.x, p0.y)
+          for (let i = 1; i < c.points.length; i++) {
+            const p = toScreen(c.points[i].x / 800, c.points[i].y / 600)
+            ctx.lineTo(p.x, p.y)
+          }
+          ctx.closePath()
+          ctx.stroke()
+        })
+      }
+    }
+
     const color = draggingRef.current ? 'rgba(16, 185, 129, 0.9)' : CONFIDENCE_COLORS[confidence]
     const fill = draggingRef.current ? 'rgba(16, 185, 129, 0.15)' : CONFIDENCE_FILL[confidence]
 

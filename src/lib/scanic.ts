@@ -1,5 +1,4 @@
-// Wrapper around the scanic library for document scanning
-// scanic provides WASM-based document edge detection
+import { type ScannerSettings } from '../store/scannerStore'
 
 /**
  * Normalizes ImageData contrast by stretching the histogram to [0, 255].
@@ -85,7 +84,8 @@ export async function initScanic(): Promise<void> {
 }
 
 export async function detectDocument(
-  input: ImageData | HTMLCanvasElement
+  input: ImageData | HTMLCanvasElement,
+  settings?: ScannerSettings
 ): Promise<ScanResult> {
   if (!initialized || !scanner) {
     throw new Error('Scanic not initialized')
@@ -124,12 +124,11 @@ export async function detectDocument(
   return s.scan(processingInput, {
     mode: 'detect',
     maxProcessingDimension: 800,
-    // Balanced thresholds: low enough to catch faint edges, high enough to reject noise
-    lowThreshold: 25,
-    highThreshold: 75,
-    // Larger dilation kernel to bridge edge gaps on light backgrounds
-    dilationKernelSize: 7,
-    epsilon: 0.02,
+    lowThreshold: settings?.lowThreshold ?? 25, 
+    highThreshold: settings?.highThreshold ?? 75,
+    dilationKernelSize: settings?.dilationKernelSize ?? 7,
+    epsilon: settings?.epsilon ?? 0.02,
+    debug: settings?.debugOverlay ?? false,
   })
 }
 
@@ -197,13 +196,14 @@ export interface Corner {
 
 export interface ScanResult {
   success: boolean
-  corners?: {
+  corners: {
     topLeft: Corner
     topRight: Corner
     bottomRight: Corner
     bottomLeft: Corner
-  }
-  output?: HTMLCanvasElement | ImageData | string
+  } | null
+  output?: HTMLCanvasElement | ImageData | string | null
+  debug?: any
   contour?: number[]
   timings?: Record<string, number>
   message?: string

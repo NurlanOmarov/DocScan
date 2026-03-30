@@ -8,15 +8,38 @@ import { DocumentList } from './components/Viewer/DocumentList'
 import { Toast } from './components/common/Toast'
 import { Spinner } from './components/common/Spinner'
 
+import { SettingsView } from './components/Scanner/SettingsView'
+
 // Idle / welcome screen
 const IdleScreen: React.FC = () => {
   const setState = useScannerStore((s) => s.setState)
   const documents = useScannerStore((s) => s.documents)
+  const timerRef = React.useRef<any>(null)
+
+  const handlePressStart = () => {
+    timerRef.current = setTimeout(() => {
+      setState('settings')
+    }, 2000) // 2 seconds long-press
+  }
+
+  const handlePressEnd = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-900 items-center justify-center px-8">
-      {/* Logo */}
-      <div className="mb-10 flex flex-col items-center">
+      {/* Logo with hiden entry point */}
+      <div 
+        className="mb-10 flex flex-col items-center cursor-pointer select-none active:scale-95 transition-transform"
+        onMouseDown={handlePressStart}
+        onMouseUp={handlePressEnd}
+        onMouseLeave={handlePressEnd}
+        onTouchStart={handlePressStart}
+        onTouchEnd={handlePressEnd}
+      >
         <div className="w-24 h-24 rounded-3xl bg-emerald-600/20 border-2 border-emerald-500/40 flex items-center justify-center mb-6">
           <svg className="w-12 h-12 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -132,6 +155,7 @@ function App() {
       {state === 'preview' && <PreviewCanvas />}
       {state === 'uploading' && <UploadProgress />}
       {state === 'done' && <DoneScreen />}
+      {state === 'settings' && <SettingsView />}
 
       {toast && <Toast />}
     </div>
