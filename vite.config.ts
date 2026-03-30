@@ -7,10 +7,13 @@ import path from 'path'
 
 const isDev = process.env.NODE_ENV !== 'production'
 
-const httpsConfig = isDev
+const keyPath = path.resolve(__dirname, 'key.pem')
+const certPath = path.resolve(__dirname, 'cert.pem')
+
+const httpsConfig = isDev && fs.existsSync(keyPath) && fs.existsSync(certPath)
   ? {
-      key: fs.readFileSync(path.resolve(__dirname, 'key.pem')),
-      cert: fs.readFileSync(path.resolve(__dirname, 'cert.pem')),
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath),
     }
   : undefined
 

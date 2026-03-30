@@ -1,0 +1,14 @@
+services:
+  docscan:
+    image: ghcr.io/nurlanomarov/docscan:latest
+    container_name: docscan
+    restart: unless-stopped
+    ports:
+      - "3007:80"
+    networks:
+      - labai-network
+
+networks:
+  labai-network:
+    external: true
+    name: labai_labai-network

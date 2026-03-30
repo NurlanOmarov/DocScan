@@ -1,0 +1,8 @@
+services:
+  docscan:
+    build: .
+    image: ghcr.io/nurlanomarov/docscan:latest
+    container_name: docscan
+    restart: unless-stopped
+    ports:
+      - "3007:80"
