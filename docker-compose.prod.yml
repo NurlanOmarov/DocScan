@@ -2,9 +2,14 @@ services:
   docscan:
     image: ghcr.io/nurlanomarov/docscan:latest
     container_name: docscan
-    restart: unless-stopped
+    restart: always
     ports:
       - "3007:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - labai-network
 
