@@ -97,7 +97,15 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
   showToast: (message, type = 'info') => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
 
-  toggleAutoMode: () => set((state) => ({ autoMode: !state.autoMode })),
+  toggleAutoMode: () => set((state) => {
+    const nextAutoMode = !state.autoMode
+    return {
+      autoMode: nextAutoMode,
+      // If we're turning off autoMode, clear the current corners
+      // so the hook can re-initialize with a fresh manual centered rect
+      corners: nextAutoMode ? state.corners : null
+    }
+  }),
   toggleFlash: () => set((state) => ({ flashOn: !state.flashOn })),
   setIsDraggingCorner: (isDragging) => set({ isDraggingCorner: isDragging }),
 

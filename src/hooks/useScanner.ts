@@ -133,13 +133,29 @@ export function useScanner(
     isDraggingCorner,
   } = useScannerStore()
 
-  // Initialize offscreen canvas
+  // Initialize offscreen canvas based on video aspect ratio
   useEffect(() => {
-    const canvas = document.createElement('canvas')
-    canvas.width = CANVAS_WIDTH
-    canvas.height = CANVAS_HEIGHT
-    offscreenCanvasRef.current = canvas
-  }, [])
+    const video = videoRef.current
+    if (!video) return
+
+    const handleResize = () => {
+      if (!video.videoWidth || !video.videoHeight) return
+      const canvas = offscreenCanvasRef.current || document.createElement('canvas')
+      const ratio = video.videoWidth / video.videoHeight
+      const targetWidth = CANVAS_WIDTH
+      const targetHeight = Math.round(targetWidth / ratio)
+      
+      canvas.width = targetWidth
+      canvas.height = targetHeight
+      offscreenCanvasRef.current = canvas
+    }
+
+    if (video.readyState >= 1) {
+      handleResize()
+    }
+    video.addEventListener('loadedmetadata', handleResize)
+    return () => video.removeEventListener('loadedmetadata', handleResize)
+  }, [videoRef])
 
   // Provide default corners for manual mode if none exist
   useEffect(() => {
@@ -186,7 +202,8 @@ export function useScanner(
     }
 
     // Process extraction (Auto-mode only)
-    extractDocument(captureCanvas)
+    // PASS ALREADY FOUND CORNERS to ensure consistency with what user saw on screen
+    extractDocument(captureCanvas, corners || undefined)
       .then((result) => {
         if (result.success && result.output instanceof HTMLCanvasElement) {
           result.output.toBlob(
@@ -227,7 +244,7 @@ export function useScanner(
         )
         showToast('Детекция недоступна. Вы можете настроить границы вручную', 'warning')
       })
-  }, [videoRef, autoMode, setCapturedFrame, setState, setCorners, setProcessedBlob, showToast])
+  }, [videoRef, autoMode, corners, setCapturedFrame, setState, setCorners, setProcessedBlob, showToast])
 
   const processFrame = useCallback(async () => {
     const video = videoRef.current
@@ -249,7 +266,7 @@ export function useScanner(
     }
 
     try {
-      ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const result = await detectDocument(canvas)
 
       const conf = getConfidence(result)
@@ -258,20 +275,20 @@ export function useScanner(
       if (result.success && result.corners) {
         const rawCorners: Corners = {
           topLeft: {
-            x: result.corners.topLeft.x / CANVAS_WIDTH,
-            y: result.corners.topLeft.y / CANVAS_HEIGHT,
+            x: result.corners.topLeft.x / canvas.width,
+            y: result.corners.topLeft.y / canvas.height,
           },
           topRight: {
-            x: result.corners.topRight.x / CANVAS_WIDTH,
-            y: result.corners.topRight.y / CANVAS_HEIGHT,
+            x: result.corners.topRight.x / canvas.width,
+            y: result.corners.topRight.y / canvas.height,
           },
           bottomRight: {
-            x: result.corners.bottomRight.x / CANVAS_WIDTH,
-            y: result.corners.bottomRight.y / CANVAS_HEIGHT,
+            x: result.corners.bottomRight.x / canvas.width,
+            y: result.corners.bottomRight.y / canvas.height,
           },
           bottomLeft: {
-            x: result.corners.bottomLeft.x / CANVAS_WIDTH,
-            y: result.corners.bottomLeft.y / CANVAS_HEIGHT,
+            x: result.corners.bottomLeft.x / canvas.width,
+            y: result.corners.bottomLeft.y / canvas.height,
           },
         }
 

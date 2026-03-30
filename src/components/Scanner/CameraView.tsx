@@ -32,6 +32,25 @@ export const CameraView: React.FC = () => {
     return () => ro.disconnect()
   }, [])
 
+  const [videoResolution, setVideoResolution] = useState({ width: 0, height: 0 })
+
+  // Capture video resolution when ready
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const handleLoaded = () => {
+      setVideoResolution({
+        width: video.videoWidth,
+        height: video.videoHeight
+      })
+    }
+    if (video.readyState >= 1) {
+      handleLoaded()
+    }
+    video.addEventListener('loadedmetadata', handleLoaded)
+    return () => video.removeEventListener('loadedmetadata', handleLoaded)
+  }, [videoRef, isReady])
+
   // Flash control
   useEffect(() => {
     switchFlash(flashOn)
@@ -145,6 +164,8 @@ export const CameraView: React.FC = () => {
           confidence={confidence}
           width={dimensions.width}
           height={dimensions.height}
+          videoWidth={videoResolution.width}
+          videoHeight={videoResolution.height}
         />
       )}
 

@@ -7,6 +7,35 @@ interface DocumentOverlayProps {
   confidence: Confidence
   width: number
   height: number
+  videoWidth: number
+  videoHeight: number
+}
+
+// Helper to map coordinates between container (screen) and video (full frame)
+// accounts for object-fit: cover
+const getMapping = (width: number, height: number, vWidth: number, vHeight: number) => {
+  if (!vWidth || !vHeight) return { scale: 1, offsetX: 0, offsetY: 0, visibleVideoWidth: width, visibleVideoHeight: height }
+  
+  const vRatio = vWidth / vHeight
+  const cRatio = width / height
+  
+  let scale, offsetX = 0, offsetY = 0
+  let visibleVideoWidth = width
+  let visibleVideoHeight = height
+
+  if (vRatio > cRatio) {
+    // Video is wider than container, sides are cut off
+    scale = height / vHeight
+    visibleVideoWidth = vWidth * scale
+    offsetX = (visibleVideoWidth - width) / 2
+  } else {
+    // Video is taller than container, top/bottom are cut off
+    scale = width / vWidth
+    visibleVideoHeight = vHeight * scale
+    offsetY = (visibleVideoHeight - height) / 2
+  }
+
+  return { scale, offsetX, offsetY, visibleVideoWidth, visibleVideoHeight }
 }
 
 const CONFIDENCE_COLORS: Record<Confidence, string> = {
@@ -23,17 +52,21 @@ const CONFIDENCE_FILL: Record<Confidence, string> = {
   high: 'rgba(16, 185, 129, 0.1)',
 }
 
-const TOUCH_THRESHOLD = 30
+const TOUCH_THRESHOLD = 35
 
 export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
   corners,
   confidence,
   width,
   height,
+  videoWidth,
+  videoHeight,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const draggingRef = useRef<keyof Corners | null>(null)
   const { setCorners, setIsDraggingCorner, autoMode } = useScannerStore()
+
+  const mapping = getMapping(width, height, videoWidth, videoHeight)
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!corners) return
@@ -48,8 +81,10 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
     let minDist = TOUCH_THRESHOLD
 
     keys.forEach(key => {
-      const cx = corners[key].x * width
-      const cy = corners[key].y * height
+      // Map normalized video corners to container pixels
+      const cx = corners[key].x * mapping.visibleVideoWidth - mapping.offsetX
+      const cy = corners[key].y * mapping.visibleVideoHeight - mapping.offsetY
+      
       const dist = Math.hypot(x - cx, y - cy)
       if (dist < minDist) {
         minDist = dist
@@ -62,22 +97,26 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
       setIsDraggingCorner(true)
       ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     }
-  }, [corners, width, height, setIsDraggingCorner])
+  }, [corners, mapping, setIsDraggingCorner])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!draggingRef.current || !corners) return
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return
 
-    const x = Math.max(0, Math.min(width, e.clientX - rect.left))
-    const y = Math.max(0, Math.min(height, e.clientY - rect.top))
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    // Map container pixels to normalized video coordinates
+    const nx = Math.max(0, Math.min(1, (x + mapping.offsetX) / mapping.visibleVideoWidth))
+    const ny = Math.max(0, Math.min(1, (y + mapping.offsetY) / mapping.visibleVideoHeight))
 
     const updated: Corners = {
       ...corners,
-      [draggingRef.current]: { x: x / width, y: y / height }
+      [draggingRef.current]: { x: nx, y: ny }
     }
     setCorners(updated)
-  }, [corners, width, height, setCorners])
+  }, [corners, mapping, setCorners])
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (draggingRef.current) {
@@ -109,8 +148,8 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
 
     // Draw viewfinder guide in center when no document and not interacting
     if (!corners || (confidence === 'none' && !draggingRef.current && autoMode)) {
-      const padX = width * 0.12
-      const padY = height * 0.18
+      const padX = width * 0.25 // Match manual mode margins
+      const padY = height * 0.2
       const cornerLen = 30
       const radius = 4
 
@@ -143,11 +182,24 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
     const color = draggingRef.current ? 'rgba(16, 185, 129, 0.9)' : CONFIDENCE_COLORS[confidence]
     const fill = draggingRef.current ? 'rgba(16, 185, 129, 0.15)' : CONFIDENCE_FILL[confidence]
 
+    // Map normalized video corners to container pixels for drawing
     const pts = [
-      { x: corners.topLeft.x * width, y: corners.topLeft.y * height },
-      { x: corners.topRight.x * width, y: corners.topRight.y * height },
-      { x: corners.bottomRight.x * width, y: corners.bottomRight.y * height },
-      { x: corners.bottomLeft.x * width, y: corners.bottomLeft.y * height },
+      { 
+        x: corners.topLeft.x * mapping.visibleVideoWidth - mapping.offsetX, 
+        y: corners.topLeft.y * mapping.visibleVideoHeight - mapping.offsetY 
+      },
+      { 
+        x: corners.topRight.x * mapping.visibleVideoWidth - mapping.offsetX, 
+        y: corners.topRight.y * mapping.visibleVideoHeight - mapping.offsetY 
+      },
+      { 
+        x: corners.bottomRight.x * mapping.visibleVideoWidth - mapping.offsetX, 
+        y: corners.bottomRight.y * mapping.visibleVideoHeight - mapping.offsetY 
+      },
+      { 
+        x: corners.bottomLeft.x * mapping.visibleVideoWidth - mapping.offsetX, 
+        y: corners.bottomLeft.y * mapping.visibleVideoHeight - mapping.offsetY 
+      },
     ]
 
     // 1. Draw Glow/Shadow behind the polygon
@@ -235,7 +287,7 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
       ctx.fillStyle = 'white'
       ctx.fillText(hint, width / 2, height / 2)
     }
-  }, [corners, confidence, width, height, autoMode])
+  }, [corners, confidence, width, height, autoMode, mapping])
 
   return (
     <canvas

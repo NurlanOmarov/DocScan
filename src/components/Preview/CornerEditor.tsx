@@ -257,21 +257,25 @@ export const CornerEditor: React.FC = () => {
       <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700">
         <button
           onClick={() => {
+            setIsDraggingCorner(false)
             if (!processedBlob) {
               setState('scanning')
             } else {
               setState('preview')
             }
           }}
-          className="text-slate-400 hover:text-white text-sm transition-colors px-2 py-1"
+          className="text-slate-400 hover:text-white text-sm transition-colors px-2 py-1 relative z-20"
         >
           Отмена
         </button>
         <span className="text-white font-semibold text-sm">Корректировка углов</span>
         <button
-          onClick={handleApply}
+          onClick={() => {
+            setIsDraggingCorner(false)
+            handleApply()
+          }}
           disabled={applying}
-          className="text-emerald-400 hover:text-emerald-300 text-sm font-medium transition-colors px-2 py-1 disabled:opacity-50"
+          className="text-emerald-400 hover:text-emerald-300 text-sm font-medium transition-colors px-2 py-1 disabled:opacity-50 relative z-20"
         >
           {applying ? 'Обработка...' : 'Применить'}
         </button>
