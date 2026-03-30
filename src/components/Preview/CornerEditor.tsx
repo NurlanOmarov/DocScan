@@ -218,7 +218,16 @@ export const CornerEditor: React.FC = () => {
     }
 
     const toBlob = (canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> =>
-      new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+      new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          console.warn('toBlob timeout')
+          resolve(null)
+        }, 5000)
+        canvas.toBlob((blob) => {
+          clearTimeout(timeout)
+          resolve(blob)
+        }, 'image/jpeg', quality)
+      })
 
     // Native canvas crop as reliable fallback (no WASM required)
     const nativeCrop = (): HTMLCanvasElement => {
@@ -229,18 +238,18 @@ export const CornerEditor: React.FC = () => {
       const br = { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H }
       const bl = { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H }
 
-      const minX = Math.min(tl.x, tr.x, br.x, bl.x)
-      const minY = Math.min(tl.y, tr.y, br.y, bl.y)
-      const maxX = Math.max(tl.x, tr.x, br.x, bl.x)
-      const maxY = Math.max(tl.y, tr.y, br.y, bl.y)
+      const minX = Math.max(0, Math.min(tl.x, tr.x, br.x, bl.x))
+      const minY = Math.max(0, Math.min(tl.y, tr.y, br.y, bl.y))
+      const maxX = Math.max(0, Math.min(W, Math.max(tl.x, tr.x, br.x, bl.x)))
+      const maxY = Math.max(0, Math.min(H, Math.max(tl.y, tr.y, br.y, bl.y)))
 
-      const cropW = Math.round(maxX - minX)
-      const cropH = Math.round(maxY - minY)
+      const cropW = Math.max(32, Math.round(maxX - minX))
+      const cropH = Math.max(32, Math.round(maxY - minY))
 
       const srcCanvas = document.createElement('canvas')
       srcCanvas.width = W
       srcCanvas.height = H
-      srcCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+      srcCanvas.getContext('2d', { willReadFrequently: true })!.putImageData(capturedFrame, 0, 0)
 
       const out = document.createElement('canvas')
       out.width = cropW
@@ -253,14 +262,13 @@ export const CornerEditor: React.FC = () => {
       const sourceCanvas = document.createElement('canvas')
       sourceCanvas.width = capturedFrame.width
       sourceCanvas.height = capturedFrame.height
-      sourceCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+      sourceCanvas.getContext('2d', { willReadFrequently: true })!.putImageData(capturedFrame, 0, 0)
 
-      // Wrap WASM call with 8-second timeout
       const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
         Promise.race([
           p,
           new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error('WASM timeout')), ms)
+            setTimeout(() => reject(new Error('Timeout')), ms)
           ),
         ])
 
@@ -271,14 +279,17 @@ export const CornerEditor: React.FC = () => {
         if (result.success && result.output instanceof HTMLCanvasElement) {
           blob = await toBlob(result.output, 0.85)
         }
-      } catch {
-        // WASM failed or timed out — use native crop
-        blob = null
+      } catch (err) {
+        console.warn('WASM extraction failed or timed out:', err)
       }
 
       // Fallback to native crop if WASM gave nothing
       if (!blob) {
-        blob = await toBlob(nativeCrop(), 0.85)
+        try {
+          blob = await toBlob(nativeCrop(), 0.85)
+        } catch (err) {
+          console.error('Native crop failed:', err)
+        }
       }
 
       // Last resort: full frame
@@ -290,11 +301,12 @@ export const CornerEditor: React.FC = () => {
         setProcessedBlob(blob)
         setState('preview')
       } else {
-        showToast('Не удалось обработать документ', 'error')
-        setApplying(false)
+        throw new Error('All image capture methods failed')
       }
-    } catch {
+    } catch (err) {
+      console.error('handleApply error:', err)
       showToast('Ошибка обработки', 'error')
+    } finally {
       setApplying(false)
     }
   }, [capturedFrame, corners, setProcessedBlob, setState, showToast])
