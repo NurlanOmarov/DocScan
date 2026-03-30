@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy to Production
 
 on:
   push:
@@ -31,7 +31,7 @@ jobs:
         with:
           switches: -avz --delete
           path: dist/
-          remote_path: ${{ secrets.SSH_PATH }}
+          remote_path: /home/administrator/docscan/dist/
           remote_host: ${{ secrets.SERVER_HOST }}
           remote_port: ${{ secrets.SSH_PORT }}
           remote_user: ${{ secrets.SERVER_USER }}
