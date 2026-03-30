@@ -14,7 +14,17 @@ export const CameraView: React.FC = () => {
 
   const { videoRef, error, isReady, switchFlash } = useCamera()
   const { corners, confidence, capture } = useScanner(videoRef)
-  const { flashOn, showToast, setState, setCapturedFrame, setProcessedBlob } = useScannerStore()
+  const {
+    flashOn,
+    showToast,
+    setState,
+    setCapturedFrame,
+    setProcessedBlob,
+    settings,
+    updateScannerSetting,
+    isDarkEnvironmentDetected
+  } = useScannerStore()
+  const highContrastMode = settings.highContrastMode
 
   // Update dimensions on resize
   useEffect(() => {
@@ -177,29 +187,59 @@ export const CameraView: React.FC = () => {
       {/* Top bar */}
       {isReady && (
         <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-safe-top pt-4 pb-3 bg-gradient-to-b from-black/60 to-transparent z-10">
-          <button
-            onClick={() => setState('idle')}
-            className="w-10 h-10 rounded-full bg-black/30 flex items-center justify-center hover:bg-black/50 transition-colors"
-            aria-label="Назад"
-          >
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setState('idle')}
+              className="w-10 h-10 rounded-full bg-black/30 flex items-center justify-center hover:bg-black/50 transition-colors"
+              aria-label="Назад"
+            >
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
 
-          <span className="text-white font-semibold text-base">Сканер</span>
+            {/* Background Mode Toggle */}
+            <button
+              onClick={() => updateScannerSetting('highContrastMode', !highContrastMode)}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                highContrastMode ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-black/30 text-white hover:bg-black/50'
+              }`}
+              title={highContrastMode ? "Темный стол (Вкл)" : "Светлый стол (Вкл)"}
+            >
+              {highContrastMode ? (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14 7 7 0 000-14z" />
+                </svg>
+              )}
+            </button>
+          </div>
 
-          {/* Confidence indicator */}
-          <div
-            className={`
-              px-3 py-1 rounded-full text-xs font-medium transition-all
-              ${confidence === 'none' ? 'opacity-0' : 'opacity-100'}
-              ${confidence === 'high' ? 'bg-emerald-600 text-white' : ''}
-              ${confidence === 'medium' ? 'bg-yellow-600 text-white' : ''}
-              ${confidence === 'low' ? 'bg-red-600 text-white' : ''}
-            `}
-          >
-            {confidenceLabel[confidence]}
+          <span className="text-white font-semibold text-base hidden sm:block">Сканер</span>
+
+          <div className="flex items-center gap-2">
+            {/* Auto-hint for dark environment */}
+            {!highContrastMode && isDarkEnvironmentDetected && (
+               <div className="animate-pulse bg-amber-400/20 text-amber-300 text-[10px] px-2 py-1 rounded-md border border-amber-400/30 whitespace-nowrap">
+                 Темный стол?
+               </div>
+            )}
+            
+            {/* Confidence indicator */}
+            <div
+              className={`
+                px-3 py-1 rounded-full text-xs font-medium transition-all
+                ${confidence === 'none' ? 'opacity-0' : 'opacity-100'}
+                ${confidence === 'high' ? 'bg-emerald-600 text-white' : ''}
+                ${confidence === 'medium' ? 'bg-yellow-600 text-white' : ''}
+                ${confidence === 'low' ? 'bg-red-600 text-white' : ''}
+              `}
+            >
+              {confidenceLabel[confidence]}
+            </div>
           </div>
         </div>
       )}

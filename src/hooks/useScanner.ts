@@ -111,6 +111,22 @@ function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: nu
   return 'high'
 }
 
+function getAverageBrightness(ctx: CanvasRenderingContext2D, width: number, height: number): number {
+  const imageData = ctx.getImageData(0, 0, width, height)
+  const data = imageData.data
+  let sum = 0
+  const step = 4 * 10 // sample every 10 pixels to be fast
+  let count = 0
+  for (let i = 0; i < data.length; i += step) {
+    const r = data[i]
+    const g = data[i + 1]
+    const b = data[i + 2]
+    sum += (r + g + b) / 3
+    count++
+  }
+  return sum / count
+}
+
 export function useScanner(videoRef: React.RefObject<HTMLVideoElement>): UseScannerResult {
   const state = useScannerStore((s) => s.state)
   const setState = useScannerStore((s) => s.setState)
@@ -123,6 +139,7 @@ export function useScanner(videoRef: React.RefObject<HTMLVideoElement>): UseScan
   const isDraggingCorner = useScannerStore((s) => s.isDraggingCorner)
   const settings = useScannerStore((s) => s.settings)
   const setDebugInfo = useScannerStore((s) => s.setDebugInfo)
+  const setIsDarkEnvironmentDetected = useScannerStore((s) => s.setIsDarkEnvironmentDetected)
 
   const [confidence, setConfidence] = useState<Confidence>('none')
   const [isDetecting, setIsDetecting] = useState(false)
@@ -245,6 +262,11 @@ export function useScanner(videoRef: React.RefObject<HTMLVideoElement>): UseScan
       }
 
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      
+      // Analyze background brightness (once every few frames or every frame)
+      const avgBrightness = getAverageBrightness(ctx, canvas.width, canvas.height)
+      setIsDarkEnvironmentDetected(avgBrightness < 65)
+
       const result = await detectDocument(canvas, settings)
       setDebugInfo(result.debug)
 

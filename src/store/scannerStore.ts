@@ -11,6 +11,7 @@ export interface ScannerSettings {
   movementThreshold: number
   minAreaRatio: number
   debugOverlay: boolean
+  highContrastMode: boolean
 }
 
 const DEFAULT_SETTINGS: ScannerSettings = {
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: ScannerSettings = {
   movementThreshold: 0.02,
   minAreaRatio: 0.08,
   debugOverlay: false,
+  highContrastMode: false,
 }
 
 const loadSettings = (): ScannerSettings => {
@@ -76,6 +78,7 @@ interface ScannerStore {
   viewerDocIndex: number
   settings: ScannerSettings
   debugInfo: any | null
+  isDarkEnvironmentDetected: boolean
 
   setState: (s: AppState) => void
   setCapturedFrame: (f: ImageData | null) => void
@@ -94,8 +97,9 @@ interface ScannerStore {
   closeViewer: () => void
   setViewerDocIndex: (i: number) => void
   updateScannerSetting: (key: keyof ScannerSettings, value: any) => void
-  resetSettings: () => void
   setDebugInfo: (info: any | null) => void
+  setIsDarkEnvironmentDetected: (isDark: boolean) => void
+  resetSettings: () => void
 }
 
 export const useScannerStore = create<ScannerStore>()((set) => ({
@@ -113,6 +117,7 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
   viewerDocIndex: 0,
   settings: loadSettings(),
   debugInfo: null,
+  isDarkEnvironmentDetected: false,
 
   setState: (s) => set({ state: s }),
   setCapturedFrame: (f) => set({ capturedFrame: f }),
@@ -120,6 +125,7 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
   setProcessedBlob: (b) => set({ processedBlob: b }),
   setUploadProgress: (p) => set({ uploadProgress: p }),
   setDebugInfo: (info) => set({ debugInfo: info }),
+  setIsDarkEnvironmentDetected: (d) => set({ isDarkEnvironmentDetected: d }),
 
   addDocument: (doc) =>
     set((state) => ({ documents: [doc, ...state.documents] })),

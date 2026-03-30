@@ -121,10 +121,14 @@ export async function detectDocument(
     ))
   }
 
+  const lowThresh = settings?.highContrastMode 
+    ? Math.max(settings.lowThreshold, 100) // Dark background mode: use at least 100
+    : settings?.lowThreshold ?? 25
+
   return s.scan(processingInput, {
     mode: 'detect',
     maxProcessingDimension: 800,
-    lowThreshold: settings?.lowThreshold ?? 25, 
+    lowThreshold: lowThresh, 
     highThreshold: settings?.highThreshold ?? 75,
     dilationKernelSize: settings?.dilationKernelSize ?? 7,
     epsilon: settings?.epsilon ?? 0.02,
