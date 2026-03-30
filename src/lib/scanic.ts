@@ -10,7 +10,10 @@ interface ScanOptions {
   maxProcessingDimension?: number
   lowThreshold?: number
   highThreshold?: number
+  dilationKernelSize?: number
+  dilationIterations?: number
   minArea?: number
+  epsilon?: number
   debug?: boolean
 }
 
@@ -53,6 +56,11 @@ export async function detectDocument(
   return s.scan(imageData, {
     mode: 'detect',
     maxProcessingDimension: 800,
+    lowThreshold: 50,
+    highThreshold: 150,
+    minArea: 20000,
+    dilationKernelSize: 5,
+    epsilon: 0.02,
   })
 }
 

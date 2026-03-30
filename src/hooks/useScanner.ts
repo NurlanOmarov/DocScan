@@ -16,6 +16,13 @@ const CANVAS_HEIGHT = 600
 const DETECTION_INTERVAL_MS = 100 // 10 FPS
 const STABLE_FRAMES_REQUIRED = 10 // 1 second at 10 FPS
 
+function lerpPoint(p1: { x: number; y: number }, p2: { x: number; y: number }, t: number) {
+  return {
+    x: p1.x + (p2.x - p1.x) * t,
+    y: p1.y + (p2.y - p1.y) * t,
+  }
+}
+
 function computeContourArea(corners: Corners): number {
   // Shoelace formula for quadrilateral area
   const pts = [
@@ -33,17 +40,67 @@ function computeContourArea(corners: Corners): number {
   return Math.abs(area) / 2
 }
 
+/**
+ * Checks if a quadrilateral is convex and has reasonable angles (60-120 degrees)
+ */
+function validateGeometry(corners: Corners): { isValid: boolean; score: number } {
+  const pts = [
+    corners.topLeft,
+    corners.topRight,
+    corners.bottomRight,
+    corners.bottomLeft,
+  ]
+
+  // 1. Check Convexity using cross products
+  let sign = 0
+  for (let i = 0; i < 4; i++) {
+    const p1 = pts[i]
+    const p2 = pts[(i + 1) % 4]
+    const p3 = pts[(i + 2) % 4]
+    const cp = (p2.x - p1.x) * (p3.y - p2.y) - (p2.y - p1.y) * (p3.x - p2.x)
+    if (i === 0) sign = Math.sign(cp)
+    else if (Math.sign(cp) !== sign || cp === 0) return { isValid: false, score: 0 }
+  }
+
+  // 2. Check Angles and Aspect Ratio
+  // We want angles close to 90 degrees.
+  let angleScore = 0
+  for (let i = 0; i < 4; i++) {
+    const p1 = pts[(i + 3) % 4]
+    const p2 = pts[i]
+    const p3 = pts[(i + 1) % 4]
+
+    const v1 = { x: p1.x - p2.x, y: p1.y - p2.y }
+    const v2 = { x: p3.x - p2.x, y: p3.y - p2.y }
+
+    const dot = v1.x * v2.x + v1.y * v2.y
+    const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y)
+    const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y)
+
+    const angle = Math.acos(dot / (mag1 * mag2)) * (180 / Math.PI)
+    if (angle < 45 || angle > 135) return { isValid: false, score: 0 }
+    angleScore += 1 - Math.abs(angle - 90) / 45
+  }
+
+  return { isValid: true, score: angleScore / 4 }
+}
+
 function getConfidence(result: ScanResult): Confidence {
   if (!result.success || !result.corners) return 'none'
 
   const corners = result.corners as Corners
+  const { isValid, score } = validateGeometry(corners)
+  if (!isValid) return 'none'
+
   const area = computeContourArea(corners)
   const totalArea = CANVAS_WIDTH * CANVAS_HEIGHT
   const ratio = area / totalArea
 
-  if (ratio < 0.05) return 'none'
-  if (ratio < 0.15) return 'low'
-  if (ratio < 0.35) return 'medium'
+  // Document should occupy significant space
+  if (ratio < 0.1) return 'low'
+  if (ratio < 0.25 || score < 0.7) return 'medium'
+  if (ratio > 0.85) return 'medium' // Too close, might be cut off
+
   return 'high'
 }
 
@@ -59,6 +116,11 @@ export function useScanner(
   const lastDetectionRef = useRef<number>(0)
   const stableFramesRef = useRef<number>(0)
   const capturedRef = useRef<boolean>(false)
+
+  // Smoothing and stabilization refs
+  const lastValidCornersRef = useRef<Corners | null>(null)
+  const smoothingFactor = 0.4 // 0.4 = 40% new frame, 60% previous (lower = smoother)
+  const MOVEMENT_THRESHOLD = 0.015 // 1.5% screen movement allowed for stability
 
   const {
     state,
@@ -77,66 +139,6 @@ export function useScanner(
     canvas.height = CANVAS_HEIGHT
     offscreenCanvasRef.current = canvas
   }, [])
-
-  const processFrame = useCallback(async () => {
-    const video = videoRef.current
-    const canvas = offscreenCanvasRef.current
-    if (!video || !canvas || video.readyState < 2) return
-    if (!isInitialized()) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const now = Date.now()
-    if (now - lastDetectionRef.current < DETECTION_INTERVAL_MS) return
-    lastDetectionRef.current = now
-
-    try {
-      ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-      const result = await detectDocument(canvas)
-
-      const conf = getConfidence(result)
-      setConfidence(conf)
-
-      if (result.success && result.corners) {
-        const scaledCorners: Corners = {
-          topLeft: {
-            x: result.corners.topLeft.x / CANVAS_WIDTH,
-            y: result.corners.topLeft.y / CANVAS_HEIGHT,
-          },
-          topRight: {
-            x: result.corners.topRight.x / CANVAS_WIDTH,
-            y: result.corners.topRight.y / CANVAS_HEIGHT,
-          },
-          bottomRight: {
-            x: result.corners.bottomRight.x / CANVAS_WIDTH,
-            y: result.corners.bottomRight.y / CANVAS_HEIGHT,
-          },
-          bottomLeft: {
-            x: result.corners.bottomLeft.x / CANVAS_WIDTH,
-            y: result.corners.bottomLeft.y / CANVAS_HEIGHT,
-          },
-        }
-        setCorners(scaledCorners)
-      } else {
-        setCorners(null)
-      }
-
-      // Auto-capture logic
-      if (autoMode && conf === 'high') {
-        stableFramesRef.current += 1
-        if (stableFramesRef.current >= STABLE_FRAMES_REQUIRED && !capturedRef.current) {
-          capturedRef.current = true
-          doCapture()
-        }
-      } else {
-        stableFramesRef.current = 0
-        capturedRef.current = false
-      }
-    } catch {
-      // Detection error is non-fatal
-    }
-  }, [videoRef, autoMode])
 
   const doCapture = useCallback(() => {
     const video = videoRef.current
@@ -207,6 +209,100 @@ export function useScanner(
         showToast('Детекция недоступна. Вы можете захватить вручную', 'warning')
       })
   }, [videoRef, setCapturedFrame, setState, setProcessedBlob, showToast])
+
+  const processFrame = useCallback(async () => {
+    const video = videoRef.current
+    const canvas = offscreenCanvasRef.current
+    if (!video || !canvas || video.readyState < 2) return
+    if (!isInitialized()) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const now = Date.now()
+    if (now - lastDetectionRef.current < DETECTION_INTERVAL_MS) return
+    lastDetectionRef.current = now
+
+    try {
+      ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+      const result = await detectDocument(canvas)
+
+      const conf = getConfidence(result)
+      setConfidence(conf)
+
+      if (result.success && result.corners) {
+        const rawCorners: Corners = {
+          topLeft: {
+            x: result.corners.topLeft.x / CANVAS_WIDTH,
+            y: result.corners.topLeft.y / CANVAS_HEIGHT,
+          },
+          topRight: {
+            x: result.corners.topRight.x / CANVAS_WIDTH,
+            y: result.corners.topRight.y / CANVAS_HEIGHT,
+          },
+          bottomRight: {
+            x: result.corners.bottomRight.x / CANVAS_WIDTH,
+            y: result.corners.bottomRight.y / CANVAS_HEIGHT,
+          },
+          bottomLeft: {
+            x: result.corners.bottomLeft.x / CANVAS_WIDTH,
+            y: result.corners.bottomLeft.y / CANVAS_HEIGHT,
+          },
+        }
+
+        let finalCorners = rawCorners
+
+        // Temporal Smoothing (Lerp)
+        if (lastValidCornersRef.current && conf !== 'none') {
+          // Check if document moved significantly
+          const dx = Math.abs(rawCorners.topLeft.x - lastValidCornersRef.current.topLeft.x)
+          const dy = Math.abs(rawCorners.topLeft.y - lastValidCornersRef.current.topLeft.y)
+
+          if (dx < MOVEMENT_THRESHOLD && dy < MOVEMENT_THRESHOLD) {
+            // Document is stable, apply lerp for smoothness
+            finalCorners = {
+              topLeft: lerpPoint(lastValidCornersRef.current.topLeft, rawCorners.topLeft, smoothingFactor),
+              topRight: lerpPoint(lastValidCornersRef.current.topRight, rawCorners.topRight, smoothingFactor),
+              bottomRight: lerpPoint(
+                lastValidCornersRef.current.bottomRight,
+                rawCorners.bottomRight,
+                smoothingFactor
+              ),
+              bottomLeft: lerpPoint(
+                lastValidCornersRef.current.bottomLeft,
+                rawCorners.bottomLeft,
+                smoothingFactor
+              ),
+            }
+          }
+        }
+
+        lastValidCornersRef.current = finalCorners
+        setCorners(finalCorners)
+      } else {
+        // If detection fails, we might want to keep the corners for a split second 
+        // to avoid "blinking", but for now we clear to be responsive.
+        lastValidCornersRef.current = null
+        setCorners(null)
+      }
+
+      // Auto-capture logic
+      if (autoMode && conf === 'high') {
+        stableFramesRef.current += 1
+        if (stableFramesRef.current >= STABLE_FRAMES_REQUIRED && !capturedRef.current) {
+          capturedRef.current = true
+          doCapture()
+        }
+      } else {
+        stableFramesRef.current = 0
+        capturedRef.current = false
+      }
+    } catch {
+      // Detection error is non-fatal
+    }
+  }, [videoRef, autoMode, doCapture])
+
+
 
   async function compressBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
     return new Promise((resolve, reject) => {

@@ -23,9 +23,6 @@ const IdleScreen: React.FC = () => {
           </svg>
         </div>
         <h1 className="text-white text-3xl font-bold mb-2">DocScan</h1>
-        <p className="text-slate-400 text-center text-sm leading-relaxed max-w-xs">
-          Интеллектуальный сканер документов с автоматической детекцией краёв
-        </p>
       </div>
 
       {/* Actions */}
@@ -57,19 +54,6 @@ const IdleScreen: React.FC = () => {
         )}
       </div>
 
-      {/* Features */}
-      <div className="mt-10 grid grid-cols-3 gap-4 w-full max-w-sm">
-        {[
-          { icon: '🎯', text: 'Авто-детекция' },
-          { icon: '✂️', text: 'Выпрямление' },
-          { icon: '💾', text: 'Сохранение' },
-        ].map((f) => (
-          <div key={f.text} className="flex flex-col items-center gap-1.5 p-3 bg-slate-800 rounded-xl border border-slate-700">
-            <span className="text-2xl">{f.icon}</span>
-            <span className="text-slate-300 text-xs text-center">{f.text}</span>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
