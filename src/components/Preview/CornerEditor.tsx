@@ -233,90 +233,81 @@ export const CornerEditor: React.FC<CornerEditorProps> = ({ onClose }) => {
         }, 'image/jpeg', quality)
       })
 
-    // Native canvas crop as reliable fallback (no WASM required)
-    const nativeCrop = (): HTMLCanvasElement => {
-      const W = capturedFrame.width
-      const H = capturedFrame.height
-      const tl = { x: activeCorners.topLeft.x * W, y: activeCorners.topLeft.y * H }
-      const tr = { x: activeCorners.topRight.x * W, y: activeCorners.topRight.y * H }
-      const br = { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H }
-      const bl = { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H }
-
-      const minX = Math.max(0, Math.min(tl.x, tr.x, br.x, bl.x))
-      const minY = Math.max(0, Math.min(tl.y, tr.y, br.y, bl.y))
-      const maxX = Math.max(0, Math.min(W, Math.max(tl.x, tr.x, br.x, bl.x)))
-      const maxY = Math.max(0, Math.min(H, Math.max(tl.y, tr.y, br.y, bl.y)))
-
-      const cropW = Math.max(32, Math.round(maxX - minX))
-      const cropH = Math.max(32, Math.round(maxY - minY))
-
-      const srcCanvas = document.createElement('canvas')
-      srcCanvas.width = W
-      srcCanvas.height = H
-      srcCanvas.getContext('2d', { willReadFrequently: true })!.putImageData(capturedFrame, 0, 0)
-
-      const out = document.createElement('canvas')
-      out.width = cropW
-      out.height = cropH
-      out.getContext('2d')!.drawImage(srcCanvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH)
-      return out
-    }
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), ms)
+        ),
+      ])
 
     try {
-      const sourceCanvas = document.createElement('canvas')
-      sourceCanvas.width = capturedFrame.width
-      sourceCanvas.height = capturedFrame.height
-      sourceCanvas.getContext('2d', { willReadFrequently: true })!.putImageData(capturedFrame, 0, 0)
+      // 1. Guard Crop: Pre-crop the original image to the bounding box of user corners
+      // This prevents WASM from "wandering off" to other detected features.
+      const W = capturedFrame.width
+      const H = capturedFrame.height
+      const tl_px = { x: activeCorners.topLeft.x * W, y: activeCorners.topLeft.y * H }
+      const tr_px = { x: activeCorners.topRight.x * W, y: activeCorners.topRight.y * H }
+      const br_px = { x: activeCorners.bottomRight.x * W, y: activeCorners.bottomRight.y * H }
+      const bl_px = { x: activeCorners.bottomLeft.x * W, y: activeCorners.bottomLeft.y * H }
 
-      const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
-        Promise.race([
-          p,
-          new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout')), ms)
-          ),
-        ])
+      const minX = Math.floor(Math.max(0, Math.min(tl_px.x, tr_px.x, br_px.x, bl_px.x)))
+      const minY = Math.floor(Math.max(0, Math.min(tl_px.y, tr_px.y, br_px.y, bl_px.y)))
+      const maxX = Math.ceil(Math.min(W, Math.max(tl_px.x, tr_px.x, br_px.x, bl_px.x)))
+      const maxY = Math.ceil(Math.min(H, Math.max(tl_px.y, tr_px.y, br_px.y, bl_px.y)))
+      const guardW = maxX - minX
+      const guardH = maxY - minY
+
+      if (guardW < 50 || guardH < 50) {
+        showToast('Область слишком мала', 'error')
+        setApplying(false)
+        return
+      }
+
+      const guardCanvas = document.createElement('canvas')
+      guardCanvas.width = guardW
+      guardCanvas.height = guardH
+      const guardCtx = guardCanvas.getContext('2d', { willReadFrequently: true })!
+      
+      // Draw the sub-rectangle into the guard canvas
+      const fullSrcCanvas = document.createElement('canvas')
+      fullSrcCanvas.width = W
+      fullSrcCanvas.height = H
+      fullSrcCanvas.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+      guardCtx.drawImage(fullSrcCanvas, minX, minY, guardW, guardH, 0, 0, guardW, guardH)
+
+      // 2. Translate corners to guard canvas space (normalized)
+      const localCorners: Corners = {
+        topLeft: { x: (tl_px.x - minX) / guardW, y: (tl_px.y - minY) / guardH },
+        topRight: { x: (tr_px.x - minX) / guardW, y: (tr_px.y - minY) / guardH },
+        bottomRight: { x: (br_px.x - minX) / guardW, y: (br_px.y - minY) / guardH },
+        bottomLeft: { x: (bl_px.x - minX) / guardW, y: (bl_px.y - minY) / guardH },
+      }
 
       let blob: Blob | null = null
 
       try {
-        const result = await withTimeout(extractDocument(sourceCanvas, activeCorners), 8000)
+        console.log('Attempting guard-cropped extraction...')
+        const result = await withTimeout(extractDocument(guardCanvas, localCorners), 6000)
+        
         if (result.success && result.output instanceof HTMLCanvasElement) {
-          // Heuristic check: if result is too small compared to source, it might be a 'fragment' error
-          const outArea = result.output.width * result.output.height
-          const srcArea = sourceCanvas.width * sourceCanvas.height
-          
-          // Calculate expected area based on corners
-          const w1 = Math.hypot(activeCorners.topRight.x - activeCorners.topLeft.x, activeCorners.topRight.y - activeCorners.topLeft.y)
-          const w2 = Math.hypot(activeCorners.bottomRight.x - activeCorners.bottomLeft.x, activeCorners.bottomRight.y - activeCorners.bottomLeft.y)
-          const h1 = Math.hypot(activeCorners.bottomLeft.x - activeCorners.topLeft.x, activeCorners.bottomLeft.y - activeCorners.topLeft.y)
-          const h2 = Math.hypot(activeCorners.bottomRight.x - activeCorners.topRight.x, activeCorners.bottomRight.y - activeCorners.topRight.y)
-          const expectedAreaRatio = ((w1 + w2) / 2) * ((h1 + h2) / 2)
-          const expectedArea = srcArea * expectedAreaRatio
-
-          // If result area is < 50% of expected area, WASM likely made a mistake and found a tiny document inside
-          if (outArea < expectedArea * 0.5) {
-            console.warn('WASM output looks like a fragment, falling back to native crop. Expected area ratio:', expectedAreaRatio)
-            blob = null
-          } else {
-            blob = await toBlob(result.output, 0.85)
-          }
+          console.log('Extraction success:', result.output.width, 'x', result.output.height)
+          blob = await toBlob(result.output, 0.85)
+        } else {
+          console.warn('WASM extraction returned no output, using guard crop directly')
         }
       } catch (err) {
         console.warn('WASM extraction failed or timed out:', err)
       }
 
-      // Fallback to native crop if WASM gave nothing
+      // 3. Fallback to the guard crop itself if WASM fails or returns something weird
       if (!blob) {
         try {
-          blob = await toBlob(nativeCrop(), 0.85)
+          console.log('Using native guard crop fallback')
+          blob = await toBlob(guardCanvas, 0.85)
         } catch (err) {
-          console.error('Native crop failed:', err)
+          console.error('Native fallbacks failed:', err)
         }
-      }
-
-      // Last resort: full frame
-      if (!blob) {
-        blob = await toBlob(sourceCanvas, 0.85)
       }
 
       if (blob) {
