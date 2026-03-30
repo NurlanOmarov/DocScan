@@ -124,12 +124,11 @@ export async function detectDocument(
   return s.scan(processingInput, {
     mode: 'detect',
     maxProcessingDimension: 800,
-    // Aggressive thresholds for low-contrast edges, but raised slightly from 20 to 30 to reduce jitter
-    lowThreshold: 30, 
-    highThreshold: 80,
-    minArea: 15000, // Slightly more inclusive area
-    dilationKernelSize: 7, // Larger kernel to bridge gaps
-    dilationIterations: 2, // More iterations to join fragmented lines
+    // Balanced thresholds: low enough to catch faint edges, high enough to reject noise
+    lowThreshold: 25,
+    highThreshold: 75,
+    // Larger dilation kernel to bridge edge gaps on light backgrounds
+    dilationKernelSize: 7,
     epsilon: 0.02,
   })
 }

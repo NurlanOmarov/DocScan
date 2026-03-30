@@ -12,7 +12,6 @@ interface UseScannerResult {
 }
 
 const CANVAS_WIDTH = 800
-const CANVAS_HEIGHT = 600
 const DETECTION_INTERVAL_MS = 100 // 10 FPS
 const STABLE_FRAMES_REQUIRED = 10 // 1 second at 10 FPS
 
@@ -85,21 +84,28 @@ function validateGeometry(corners: Corners): { isValid: boolean; score: number }
   return { isValid: true, score: angleScore / 4 }
 }
 
-function getConfidence(result: ScanResult): Confidence {
+function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: number): Confidence {
   if (!result.success || !result.corners) return 'none'
 
   const corners = result.corners as Corners
   const { isValid, score } = validateGeometry(corners)
   if (!isValid) return 'none'
 
-  const area = computeContourArea(corners)
-  const totalArea = CANVAS_WIDTH * CANVAS_HEIGHT
-  const ratio = area / totalArea
+  // Normalize corners to [0..1] using the canvas dimensions (library returns absolute coords)
+  const normCorners: Corners = {
+    topLeft:     { x: corners.topLeft.x / canvasWidth,     y: corners.topLeft.y / canvasHeight },
+    topRight:    { x: corners.topRight.x / canvasWidth,    y: corners.topRight.y / canvasHeight },
+    bottomRight: { x: corners.bottomRight.x / canvasWidth, y: corners.bottomRight.y / canvasHeight },
+    bottomLeft:  { x: corners.bottomLeft.x / canvasWidth,  y: corners.bottomLeft.y / canvasHeight },
+  }
 
-  // Document should occupy significant space
-  if (ratio < 0.1) return 'low'
-  if (ratio < 0.25 || score < 0.7) return 'medium'
-  if (ratio > 0.85) return 'medium' // Too close, might be cut off
+  const area = computeContourArea(normCorners)
+  // area is now in normalized [0..1] space, total = 1.0
+
+  // Document should occupy significant space in frame
+  if (area < 0.08) return 'low'
+  if (area < 0.20 || score < 0.65) return 'medium'
+  if (area > 0.92) return 'medium' // Too close
 
   return 'high'
 }
@@ -273,8 +279,13 @@ export function useScanner(
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const result = await detectDocument(canvas)
 
-      // 1. Raw confidence
-      const rawConf = getConfidence(result)
+      // Library returns corners in original video resolution (scaleFactor already applied internally)
+      const videoEl = videoRef.current
+      const origW = videoEl?.videoWidth || canvas.width
+      const origH = videoEl?.videoHeight || canvas.height
+
+      // 1. Raw confidence (pass original dims for correct area calc)
+      const rawConf = getConfidence(result, origW, origH)
       
       // 2. Confidence Hysteresis (Majority Vote over 5 frames)
       confidenceBufferRef.current.push(rawConf)
@@ -305,20 +316,20 @@ export function useScanner(
       if (result.success && result.corners) {
         const rawCorners: Corners = {
           topLeft: {
-            x: result.corners.topLeft.x / canvas.width,
-            y: result.corners.topLeft.y / canvas.height,
+            x: result.corners.topLeft.x / origW,
+            y: result.corners.topLeft.y / origH,
           },
           topRight: {
-            x: result.corners.topRight.x / canvas.width,
-            y: result.corners.topRight.y / canvas.height,
+            x: result.corners.topRight.x / origW,
+            y: result.corners.topRight.y / origH,
           },
           bottomRight: {
-            x: result.corners.bottomRight.x / canvas.width,
-            y: result.corners.bottomRight.y / canvas.height,
+            x: result.corners.bottomRight.x / origW,
+            y: result.corners.bottomRight.y / origH,
           },
           bottomLeft: {
-            x: result.corners.bottomLeft.x / canvas.width,
-            y: result.corners.bottomLeft.y / canvas.height,
+            x: result.corners.bottomLeft.x / origW,
+            y: result.corners.bottomLeft.y / origH,
           },
         }
 
