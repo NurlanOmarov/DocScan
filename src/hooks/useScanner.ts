@@ -88,10 +88,12 @@ function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: nu
   if (!result.success || !result.corners) return 'none'
 
   const corners = result.corners as Corners
+  // validateGeometry works on raw pixel coords - correct
   const { isValid, score } = validateGeometry(corners)
   if (!isValid) return 'none'
 
-  // Normalize corners to [0..1] using the canvas dimensions (library returns absolute coords)
+  // Normalize corners to [0..1] using CANVAS dimensions
+  // (library returns corners in canvas pixel space when input is an 800px canvas)
   const normCorners: Corners = {
     topLeft:     { x: corners.topLeft.x / canvasWidth,     y: corners.topLeft.y / canvasHeight },
     topRight:    { x: corners.topRight.x / canvasWidth,    y: corners.topRight.y / canvasHeight },
@@ -99,13 +101,12 @@ function getConfidence(result: ScanResult, canvasWidth: number, canvasHeight: nu
     bottomLeft:  { x: corners.bottomLeft.x / canvasWidth,  y: corners.bottomLeft.y / canvasHeight },
   }
 
-  const area = computeContourArea(normCorners)
-  // area is now in normalized [0..1] space, total = 1.0
+  const area = computeContourArea(normCorners) // area in [0..1] space
 
-  // Document should occupy significant space in frame
+  // Document should occupy significant portion of the frame
   if (area < 0.08) return 'low'
   if (area < 0.20 || score < 0.65) return 'medium'
-  if (area > 0.92) return 'medium' // Too close
+  if (area > 0.92) return 'medium' // Too close, might be cut off
 
   return 'high'
 }
@@ -279,12 +280,11 @@ export function useScanner(
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const result = await detectDocument(canvas)
 
-      // Library returns corners in original video resolution (scaleFactor already applied internally)
-      const videoEl = videoRef.current
-      const origW = videoEl?.videoWidth || canvas.width
-      const origH = videoEl?.videoHeight || canvas.height
+      // Library returns corners in CANVAS pixel space (scaleFactor=1 since input is 800px canvas)
+      const origW = canvas.width
+      const origH = canvas.height
 
-      // 1. Raw confidence (pass original dims for correct area calc)
+      // 1. Raw confidence (pass canvas dims for correct area calc)
       const rawConf = getConfidence(result, origW, origH)
       
       // 2. Confidence Hysteresis (Majority Vote over 5 frames)
