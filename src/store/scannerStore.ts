@@ -15,7 +15,7 @@ export interface ScannerSettings {
 }
 
 const DEFAULT_SETTINGS: ScannerSettings = {
-  lowThreshold: 25,
+  lowThreshold: 100,
   highThreshold: 75,
   dilationKernelSize: 7,
   epsilon: 0.02,
