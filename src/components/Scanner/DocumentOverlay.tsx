@@ -33,7 +33,7 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const draggingRef = useRef<keyof Corners | null>(null)
-  const { setCorners, setIsDraggingCorner } = useScannerStore()
+  const { setCorners, setIsDraggingCorner, autoMode } = useScannerStore()
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!corners) return
@@ -100,8 +100,8 @@ export const DocumentOverlay: React.FC<DocumentOverlayProps> = ({
 
     ctx.clearRect(0, 0, width, height)
 
-    // Draw viewfinder guide in center when no document
-    if (!corners || (confidence === 'none' && !draggingRef.current)) {
+    // Draw viewfinder guide in center when no document and not interacting
+    if (!corners || (confidence === 'none' && !draggingRef.current && autoMode)) {
       const padX = width * 0.12
       const padY = height * 0.18
       const cornerLen = 30

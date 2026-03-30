@@ -141,6 +141,18 @@ export function useScanner(
     offscreenCanvasRef.current = canvas
   }, [])
 
+  // Provide default corners for manual mode if none exist
+  useEffect(() => {
+    if (!autoMode && !corners && state === 'scanning') {
+      setCorners({
+        topLeft: { x: 0.2, y: 0.25 },
+        topRight: { x: 0.8, y: 0.25 },
+        bottomRight: { x: 0.8, y: 0.75 },
+        bottomLeft: { x: 0.2, y: 0.75 },
+      })
+    }
+  }, [autoMode, corners, state])
+
   const doCapture = useCallback(() => {
     const video = videoRef.current
     const canvas = offscreenCanvasRef.current
@@ -223,6 +235,12 @@ export function useScanner(
     const now = Date.now()
     if (now - lastDetectionRef.current < DETECTION_INTERVAL_MS) return
     lastDetectionRef.current = now
+
+    // If manual mode is on, we skip automatic document detection entirely
+    if (!autoMode) {
+      setConfidence('none')
+      return
+    }
 
     try {
       ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
