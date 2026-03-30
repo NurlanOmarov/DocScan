@@ -38,6 +38,7 @@ function normalizeImageDataContrast(imageData: ImageData): ImageData {
 }
 
 let scanner: unknown = null
+let extractFn: unknown = null
 let initialized = false
 
 interface ScanOptions {
@@ -57,8 +58,6 @@ interface ScanOptions {
     bottomRight: Corner
     bottomLeft: Corner
   }
-  points?: number[] // [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
-  contour?: number[] // Alias for points
 }
 
 export async function initScanic(): Promise<void> {
@@ -67,7 +66,9 @@ export async function initScanic(): Promise<void> {
     const scanic = await import('scanic')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mod = scanic as any
+    
     const ScannerClass = mod.Scanner ?? mod.default?.Scanner ?? mod.default
+    extractFn = mod.extractDocument ?? mod.default?.extractDocument
 
     if (!ScannerClass) {
       throw new Error('Scanner class not found in scanic module')
@@ -142,15 +143,8 @@ export async function extractDocument(
     bottomLeft: Corner
   }
 ): Promise<ScanResult> {
-  if (!initialized || !scanner) {
+  if (!initialized) {
     throw new Error('Scanic not initialized')
-  }
-
-  const s = scanner as {
-    scan(
-      input: HTMLCanvasElement,
-      options: ScanOptions
-    ): Promise<ScanResult>
   }
 
   const options: ScanOptions = {
@@ -159,19 +153,38 @@ export async function extractDocument(
     maxProcessingDimension: 1600,
   }
 
-  // If corners are provided, denormalize them and provide in multiple formats for robustness
-  if (corners) {
-    const tl = { x: corners.topLeft.x * canvas.width, y: corners.topLeft.y * canvas.height }
-    const tr = { x: corners.topRight.x * canvas.width, y: corners.topRight.y * canvas.height }
-    const br = { x: corners.bottomRight.x * canvas.width, y: corners.bottomRight.y * canvas.height }
-    const bl = { x: corners.bottomLeft.x * canvas.width, y: corners.bottomLeft.y * canvas.height }
+  // If corners are provided, use the native extractDocument function 
+  // which skips detection and uses corners directly for perspective warp.
+  if (corners && extractFn) {
+    const denormalizedCorners = {
+      topLeft: { x: corners.topLeft.x * canvas.width, y: corners.topLeft.y * canvas.height },
+      topRight: { x: corners.topRight.x * canvas.width, y: corners.topRight.y * canvas.height },
+      bottomRight: { x: corners.bottomRight.x * canvas.width, y: corners.bottomRight.y * canvas.height },
+      bottomLeft: { x: corners.bottomLeft.x * canvas.width, y: corners.bottomLeft.y * canvas.height },
+    }
 
-    options.corners = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl }
-    options.points = [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
-    options.contour = options.points
+    const ex = extractFn as (
+      image: HTMLCanvasElement,
+      corners: { topLeft: Corner; topRight: Corner; bottomRight: Corner; bottomLeft: Corner },
+      options: ScanOptions
+    ) => Promise<ScanResult>
+
+    return ex(canvas, denormalizedCorners, options)
   }
 
-  return s.scan(canvas, options)
+  // Fallback to scan() if corners aren't provided 
+  // (though in this app they usually are from the UI)
+  if (scanner) {
+    const s = scanner as {
+      scan(
+        input: HTMLCanvasElement,
+        options: ScanOptions
+      ): Promise<ScanResult>
+    }
+    return s.scan(canvas, options)
+  }
+
+  throw new Error('Scanner or extract function not available')
 }
 
 export function isInitialized(): boolean {
