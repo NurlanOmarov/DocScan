@@ -37,6 +37,7 @@ interface ScannerStore {
   toast: ToastData | null
   autoMode: boolean
   flashOn: boolean
+  isDraggingCorner: boolean
   viewerOpen: boolean
   viewerDocIndex: number
 
@@ -52,6 +53,7 @@ interface ScannerStore {
   clearToast: () => void
   toggleAutoMode: () => void
   toggleFlash: () => void
+  setIsDraggingCorner: (isDragging: boolean) => void
   openViewer: (index: number) => void
   closeViewer: () => void
   setViewerDocIndex: (i: number) => void
@@ -67,6 +69,7 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
   toast: null,
   autoMode: true,
   flashOn: false,
+  isDraggingCorner: false,
   viewerOpen: false,
   viewerDocIndex: 0,
 
@@ -96,6 +99,7 @@ export const useScannerStore = create<ScannerStore>()((set) => ({
 
   toggleAutoMode: () => set((state) => ({ autoMode: !state.autoMode })),
   toggleFlash: () => set((state) => ({ flashOn: !state.flashOn })),
+  setIsDraggingCorner: (isDragging) => set({ isDraggingCorner: isDragging }),
 
   openViewer: (index) => set({ viewerOpen: true, viewerDocIndex: index }),
   closeViewer: () => set({ viewerOpen: false }),

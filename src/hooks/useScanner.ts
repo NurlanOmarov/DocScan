@@ -130,6 +130,7 @@ export function useScanner(
     setCorners: storeSetCorners,
     setProcessedBlob,
     showToast,
+    isDraggingCorner,
   } = useScannerStore()
 
   // Initialize offscreen canvas
@@ -250,28 +251,32 @@ export function useScanner(
           },
         }
 
+        if (isDraggingCorner) return
+        
         let finalCorners = rawCorners
 
-        // Temporal Smoothing (Lerp)
+        // Temporal Smoothing (Lerp) with Adaptive Lock-on
         if (lastValidCornersRef.current && conf !== 'none') {
           // Check if document moved significantly
           const dx = Math.abs(rawCorners.topLeft.x - lastValidCornersRef.current.topLeft.x)
           const dy = Math.abs(rawCorners.topLeft.y - lastValidCornersRef.current.topLeft.y)
 
           if (dx < MOVEMENT_THRESHOLD && dy < MOVEMENT_THRESHOLD) {
-            // Document is stable, apply lerp for smoothness
+            // Adaptive smoothing: if stable, use MUCH smaller factor (Lock-on)
+            const adaptiveSmoothing = (conf === 'high' && stableFramesRef.current > 5) ? 0.08 : smoothingFactor
+            
             finalCorners = {
-              topLeft: lerpPoint(lastValidCornersRef.current.topLeft, rawCorners.topLeft, smoothingFactor),
-              topRight: lerpPoint(lastValidCornersRef.current.topRight, rawCorners.topRight, smoothingFactor),
+              topLeft: lerpPoint(lastValidCornersRef.current.topLeft, rawCorners.topLeft, adaptiveSmoothing),
+              topRight: lerpPoint(lastValidCornersRef.current.topRight, rawCorners.topRight, adaptiveSmoothing),
               bottomRight: lerpPoint(
                 lastValidCornersRef.current.bottomRight,
                 rawCorners.bottomRight,
-                smoothingFactor
+                adaptiveSmoothing
               ),
               bottomLeft: lerpPoint(
                 lastValidCornersRef.current.bottomLeft,
                 rawCorners.bottomLeft,
-                smoothingFactor
+                adaptiveSmoothing
               ),
             }
           }
@@ -280,10 +285,11 @@ export function useScanner(
         lastValidCornersRef.current = finalCorners
         setCorners(finalCorners)
       } else {
-        // If detection fails, we might want to keep the corners for a split second 
-        // to avoid "blinking", but for now we clear to be responsive.
-        lastValidCornersRef.current = null
-        setCorners(null)
+        // If detection fails and we're NOT dragging, clear
+        if (!isDraggingCorner) {
+          lastValidCornersRef.current = null
+          setCorners(null)
+        }
       }
 
       // Auto-capture logic
