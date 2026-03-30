@@ -23,8 +23,8 @@ export function useCamera(): UseCameraResult {
         const constraints: MediaStreamConstraints = {
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 4000 },
+            height: { ideal: 4000 },
           },
           audio: false,
         }

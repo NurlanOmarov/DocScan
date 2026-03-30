@@ -9,12 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "zustand": "^4.5.0",
-    "scanic": "^1.0.6"
+    "scanic": "^1.0.6",
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@types/jspdf": "^1.3.3",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
@@ -23,7 +25,7 @@
     "tailwindcss": "^3.4.0",
     "typescript": "^5.2.0",
     "vite": "^5.0.0",
-    "vite-plugin-wasm": "^3.3.0",
-    "vite-plugin-top-level-await": "^1.4.0"
+    "vite-plugin-top-level-await": "^1.4.0",
+    "vite-plugin-wasm": "^3.3.0"
   }
 }
