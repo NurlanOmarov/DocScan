@@ -7,7 +7,11 @@ const HANDLE_INNER = 10
 
 type CornerKey = keyof Corners
 
-export const CornerEditor: React.FC = () => {
+interface CornerEditorProps {
+  onClose?: () => void
+}
+
+export const CornerEditor: React.FC<CornerEditorProps> = ({ onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<CornerKey | null>(null)
@@ -300,6 +304,7 @@ export const CornerEditor: React.FC = () => {
       if (blob) {
         setProcessedBlob(blob)
         setState('preview')
+        onClose?.()
       } else {
         throw new Error('All image capture methods failed')
       }
@@ -309,17 +314,18 @@ export const CornerEditor: React.FC = () => {
     } finally {
       setApplying(false)
     }
-  }, [capturedFrame, corners, setProcessedBlob, setState, showToast])
+  }, [capturedFrame, corners, setProcessedBlob, setState, showToast, onClose])
 
   return (
     <div className="flex flex-col h-full bg-slate-900">
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700 relative z-10">
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700 relative z-[30]">
         <button
           onClick={() => {
             setIsDraggingCorner(false)
             if (!processedBlob) {
               setState('scanning')
             } else {
+              onClose?.()
               setState('preview')
             }
           }}

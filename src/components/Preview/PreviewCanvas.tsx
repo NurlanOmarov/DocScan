@@ -136,7 +136,7 @@ export const PreviewCanvas: React.FC = () => {
   }
 
   if (showEditor) {
-    return <CornerEditor />
+    return <CornerEditor onClose={() => setShowEditor(false)} />
   }
 
   return (
