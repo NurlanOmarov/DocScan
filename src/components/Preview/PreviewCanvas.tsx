@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useScannerStore } from '../../store/scannerStore'
 import { Spinner } from '../common/Spinner'
 import { CornerEditor } from './CornerEditor'
@@ -41,7 +41,6 @@ async function simulateUpload(
 }
 
 export const PreviewCanvas: React.FC = () => {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [showEditor, setShowEditor] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(false)
@@ -63,19 +62,17 @@ export const PreviewCanvas: React.FC = () => {
     }
   }, [autoMode, processedBlob, capturedFrame])
 
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  // Manage preview URL lifecycle
   useEffect(() => {
-    if (!processedBlob || !canvasRef.current) return
-    const canvas = canvasRef.current
-    const url = URL.createObjectURL(processedBlob)
-    const img = new Image()
-    img.onload = () => {
-      canvas.width = img.width
-      canvas.height = img.height
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0)
-      URL.revokeObjectURL(url)
+    if (!processedBlob) {
+      setPreviewUrl(null)
+      return
     }
-    img.src = url
+    const url = URL.createObjectURL(processedBlob)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
   }, [processedBlob])
 
   const handleUpload = async () => {
@@ -163,17 +160,19 @@ export const PreviewCanvas: React.FC = () => {
 
       {/* Preview area */}
       <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-0">
-        {!processedBlob ? (
+        {!processedBlob || !previewUrl ? (
           <div className="flex flex-col items-center gap-3">
             <Spinner size={48} />
             <p className="text-slate-400 text-sm">Обработка документа...</p>
           </div>
         ) : (
           <div className="relative max-w-full max-h-full">
-            <canvas
-              ref={canvasRef}
-              className="max-w-full max-h-full rounded-lg shadow-2xl object-contain"
+            <img
+              src={previewUrl}
+              alt="Сканированный документ"
+              className="max-w-full max-h-full rounded-lg shadow-2xl object-contain bg-slate-800"
               style={{ maxHeight: 'calc(100vh - 220px)' }}
+              onError={() => showToast('Ошибка отображения превью', 'error')}
             />
           </div>
         )}
