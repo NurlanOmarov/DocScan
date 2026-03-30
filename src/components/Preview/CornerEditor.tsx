@@ -207,19 +207,20 @@ export const CornerEditor: React.FC = () => {
   }, [setIsDraggingCorner])
 
   const handleApply = useCallback(async () => {
-    if (!capturedFrame) return
+    if (!capturedFrame || applying) return
     setApplying(true)
 
-    try {
-      // Use provided corners or fallback to full-frame if still null
-      const activeCorners = corners || {
-        topLeft: { x: 0, y: 0 },
-        topRight: { x: 1, y: 0 },
-        bottomRight: { x: 1, y: 1 },
-        bottomLeft: { x: 0, y: 1 },
-      }
+    const activeCorners = corners || {
+      topLeft: { x: 0, y: 0 },
+      topRight: { x: 1, y: 0 },
+      bottomRight: { x: 1, y: 1 },
+      bottomLeft: { x: 0, y: 1 },
+    }
 
-      // Rebuild canvas with corners for extraction
+    const toBlob = (canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> =>
+      new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+
+    try {
       const sourceCanvas = document.createElement('canvas')
       sourceCanvas.width = capturedFrame.width
       sourceCanvas.height = capturedFrame.height
@@ -228,53 +229,47 @@ export const CornerEditor: React.FC = () => {
 
       const result = await extractDocument(sourceCanvas, activeCorners)
 
+      let blob: Blob | null = null
+
       if (result.success && result.output instanceof HTMLCanvasElement) {
-        result.output.toBlob(
-          (blob) => {
-            if (blob) {
-              setProcessedBlob(blob)
-              setState('preview')
-            } else {
-              showToast('Не удалось обработать документ', 'error')
-            }
-          },
-          'image/jpeg',
-          0.85
-        )
+        blob = await toBlob(result.output, 0.85)
+      }
+
+      // Fallback to raw frame if extraction failed or blob is null
+      if (!blob) {
+        blob = await toBlob(sourceCanvas, 0.85)
+      }
+
+      if (blob) {
+        setProcessedBlob(blob)
+        setState('preview')
       } else {
-        // Use captured frame as fallback
-        sourceCanvas.toBlob(
-          (blob) => {
-            if (blob) setProcessedBlob(blob)
-            setState('preview')
-          },
-          'image/jpeg',
-          0.85
-        )
+        showToast('Не удалось обработать документ', 'error')
+        setApplying(false)
       }
     } catch {
       showToast('Ошибка обработки. Используется исходное изображение.', 'warning')
-      const sourceCanvas = document.createElement('canvas')
-      sourceCanvas.width = capturedFrame.width
-      sourceCanvas.height = capturedFrame.height
-      const ctx = sourceCanvas.getContext('2d')!
-      ctx.putImageData(capturedFrame, 0, 0)
-      sourceCanvas.toBlob(
-        (blob) => {
-          if (blob) setProcessedBlob(blob)
+      try {
+        const fallback = document.createElement('canvas')
+        fallback.width = capturedFrame.width
+        fallback.height = capturedFrame.height
+        fallback.getContext('2d')!.putImageData(capturedFrame, 0, 0)
+        const blob = await toBlob(fallback, 0.85)
+        if (blob) {
+          setProcessedBlob(blob)
           setState('preview')
-        },
-        'image/jpeg',
-        0.85
-      )
-    } finally {
+          return
+        }
+      } catch {
+        // ignore
+      }
       setApplying(false)
     }
-  }, [capturedFrame, corners, setProcessedBlob, setState, showToast])
+  }, [capturedFrame, corners, applying, setProcessedBlob, setState, showToast])
 
   return (
     <div className="flex flex-col h-full bg-slate-900">
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700">
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700 relative z-10">
         <button
           onClick={() => {
             setIsDraggingCorner(false)
@@ -284,18 +279,20 @@ export const CornerEditor: React.FC = () => {
               setState('preview')
             }
           }}
-          className="text-slate-400 hover:text-white text-sm transition-colors px-2 py-1 relative z-20"
+          className="text-slate-400 hover:text-white text-sm transition-colors px-3 py-2"
         >
           Отмена
         </button>
         <span className="text-white font-semibold text-sm">Корректировка углов</span>
         <button
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => {
             setIsDraggingCorner(false)
+            draggingRef.current = null
             handleApply()
           }}
           disabled={applying}
-          className="text-emerald-400 hover:text-emerald-300 text-sm font-medium transition-colors px-2 py-1 disabled:opacity-50 relative z-20"
+          className="text-emerald-400 hover:text-emerald-300 text-sm font-medium transition-colors px-3 py-2 disabled:opacity-50"
         >
           {applying ? 'Обработка...' : 'Применить'}
         </button>
@@ -305,7 +302,7 @@ export const CornerEditor: React.FC = () => {
         Перетащите угловые точки для точной настройки
       </p>
 
-      <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
+      <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-hidden">
         <canvas
           ref={canvasRef}
           className="max-w-full max-h-full touch-none cursor-crosshair"
@@ -315,15 +312,6 @@ export const CornerEditor: React.FC = () => {
           onPointerLeave={handlePointerUp}
           style={{ touchAction: 'none' }}
         />
-        
-        {/* Instruction Hint */}
-        {draggingRef.current === null && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-            <div className="bg-black/40 backdrop-blur-sm border border-white/20 text-white px-4 py-2 rounded-full text-sm font-medium shadow-xl">
-              Перетащите углы
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
