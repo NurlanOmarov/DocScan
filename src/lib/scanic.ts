@@ -1,6 +1,42 @@
 // Wrapper around the scanic library for document scanning
 // scanic provides WASM-based document edge detection
 
+/**
+ * Normalizes ImageData contrast by stretching the histogram to [0, 255].
+ * This significantly helps with low-contrast images (e.g. light documents on light tables).
+ */
+function normalizeImageDataContrast(imageData: ImageData): ImageData {
+  const data = imageData.data
+  let min = 255
+  let max = 0
+
+  // 1. Find min/max luminosity (using quick approximation: (R+G+B)/3)
+  for (let i = 0; i < data.length; i += 4) {
+    const avg = (data[i] + data[i + 1] + data[i + 2]) / 3
+    if (avg < min) min = avg
+    if (avg > max) max = avg
+  }
+
+  // If already high contrast or too dark, skip stretching
+  if (max - min < 10) return imageData
+
+  // 2. Create Lookup Table (LUT) for faster processing
+  const lut = new Uint8ClampedArray(256)
+  const range = max - min
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.min(255, Math.max(0, ((i - min) / range) * 255))
+  }
+
+  // 3. Apply LUT
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]]
+    data[i + 1] = lut[data[i + 1]]
+    data[i + 2] = lut[data[i + 2]]
+  }
+
+  return imageData
+}
+
 let scanner: unknown = null
 let initialized = false
 
@@ -48,7 +84,7 @@ export async function initScanic(): Promise<void> {
 }
 
 export async function detectDocument(
-  imageData: ImageData | HTMLCanvasElement
+  input: ImageData | HTMLCanvasElement
 ): Promise<ScanResult> {
   if (!initialized || !scanner) {
     throw new Error('Scanic not initialized')
@@ -61,13 +97,38 @@ export async function detectDocument(
     ): Promise<ScanResult>
   }
 
-  return s.scan(imageData, {
+  // Sensitivity improvement: pre-process for contrast
+  let processingInput = input
+  if (input instanceof HTMLCanvasElement) {
+    const ctx = input.getContext('2d', { willReadFrequently: true })
+    if (ctx) {
+      const imageData = ctx.getImageData(0, 0, input.width, input.height)
+      const normalized = normalizeImageDataContrast(imageData)
+      
+      // We don't want to modify the source canvas directly to avoid artifacts in final extract,
+      // but scanic's WASM layer works best on higher contrast. 
+      // It's better to provide ImageData to scanic.
+      processingInput = normalized
+    }
+  } else if (input instanceof ImageData) {
+    // Since we're modifying the ImageData in place or returning a copy, 
+    // it's safer to clone if we don't want to affect the caller's data
+    processingInput = normalizeImageDataContrast(new ImageData(
+      new Uint8ClampedArray(input.data),
+      input.width,
+      input.height
+    ))
+  }
+
+  return s.scan(processingInput, {
     mode: 'detect',
     maxProcessingDimension: 800,
-    lowThreshold: 50,
-    highThreshold: 150,
-    minArea: 20000,
-    dilationKernelSize: 5,
+    // Aggressive thresholds for low-contrast edges
+    lowThreshold: 20, 
+    highThreshold: 80,
+    minArea: 15000, // Slightly more inclusive area
+    dilationKernelSize: 7, // Larger kernel to bridge gaps
+    dilationIterations: 2, // More iterations to join fragmented lines
     epsilon: 0.02,
   })
 }
