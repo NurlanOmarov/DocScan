@@ -107,7 +107,6 @@ function getConfidence(result: ScanResult): Confidence {
 export function useScanner(
   videoRef: React.RefObject<HTMLVideoElement>
 ): UseScannerResult {
-  const [corners, setCorners] = useState<Corners | null>(null)
   const [confidence, setConfidence] = useState<Confidence>('none')
   const [isDetecting, setIsDetecting] = useState(false)
 
@@ -124,10 +123,11 @@ export function useScanner(
 
   const {
     state,
+    corners,
     autoMode,
     setState,
     setCapturedFrame,
-    setCorners: storeSetCorners,
+    setCorners,
     setProcessedBlob,
     showToast,
     isDraggingCorner,
@@ -151,7 +151,7 @@ export function useScanner(
         bottomLeft: { x: 0.2, y: 0.75 },
       })
     }
-  }, [autoMode, corners, state])
+  }, [autoMode, corners, state, setCorners])
 
   const doCapture = useCallback(() => {
     const video = videoRef.current
@@ -324,9 +324,7 @@ export function useScanner(
     } catch {
       // Detection error is non-fatal
     }
-  }, [videoRef, autoMode, doCapture])
-
-
+  }, [videoRef, autoMode, doCapture, setCorners, isDraggingCorner, smoothingFactor])
 
   async function compressBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
     return new Promise((resolve, reject) => {
@@ -371,11 +369,6 @@ export function useScanner(
       setIsDetecting(false)
     }
   }, [state, processFrame])
-
-  // Sync corners to store
-  useEffect(() => {
-    storeSetCorners(corners)
-  }, [corners, storeSetCorners])
 
   const capture = useCallback(() => {
     if (capturedRef.current) return
