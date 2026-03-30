@@ -16,14 +16,14 @@ export interface ScannerSettings {
 
 const DEFAULT_SETTINGS: ScannerSettings = {
   lowThreshold: 100,
-  highThreshold: 75,
-  dilationKernelSize: 7,
+  highThreshold: 250,
+  dilationKernelSize: 5,
   epsilon: 0.02,
   smoothingFactor: 0.2,
   movementThreshold: 0.02,
   minAreaRatio: 0.08,
   debugOverlay: false,
-  highContrastMode: false,
+  highContrastMode: true,
 }
 
 const loadSettings = (): ScannerSettings => {

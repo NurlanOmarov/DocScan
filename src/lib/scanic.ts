@@ -121,16 +121,22 @@ export async function detectDocument(
     ))
   }
 
-  const lowThresh = settings?.highContrastMode 
-    ? Math.max(settings.lowThreshold, 100) // Dark background mode: use at least 100
-    : settings?.lowThreshold ?? 25
+  const isHighContrast = settings?.highContrastMode ?? true // Default to true since user wants 100 base
+  
+  const lowThresh = isHighContrast 
+    ? Math.max(settings?.lowThreshold ?? 100, 100)
+    : 40 // Mode for light surfaces
+
+  const highThresh = isHighContrast
+    ? Math.max(settings?.highThreshold ?? 250, 200)
+    : 100
 
   return s.scan(processingInput, {
     mode: 'detect',
     maxProcessingDimension: 800,
     lowThreshold: lowThresh, 
-    highThreshold: settings?.highThreshold ?? 75,
-    dilationKernelSize: settings?.dilationKernelSize ?? 7,
+    highThreshold: highThresh,
+    dilationKernelSize: settings?.dilationKernelSize ?? 5,
     epsilon: settings?.epsilon ?? 0.02,
     debug: settings?.debugOverlay ?? false,
   })
