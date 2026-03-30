@@ -47,12 +47,21 @@ export const PreviewCanvas: React.FC = () => {
   const [uploadError, setUploadError] = useState(false)
 
   const {
+    autoMode,
+    capturedFrame,
     processedBlob,
     setUploadProgress,
     addDocument,
     setState,
     showToast,
   } = useScannerStore()
+
+  // Auto-open editor if we just did a manual capture (no blob yet)
+  useEffect(() => {
+    if (!autoMode && !processedBlob && capturedFrame) {
+      setShowEditor(true)
+    }
+  }, [autoMode, processedBlob, capturedFrame])
 
   useEffect(() => {
     if (!processedBlob || !canvasRef.current) return

@@ -16,6 +16,7 @@ export const CornerEditor: React.FC = () => {
   const {
     capturedFrame,
     corners,
+    processedBlob,
     setCorners,
     setProcessedBlob,
     setState,
@@ -197,7 +198,7 @@ export const CornerEditor: React.FC = () => {
       const ctx = sourceCanvas.getContext('2d')!
       ctx.putImageData(capturedFrame, 0, 0)
 
-      const result = await extractDocument(sourceCanvas)
+      const result = await extractDocument(sourceCanvas, corners)
 
       if (result.success && result.output instanceof HTMLCanvasElement) {
         result.output.toBlob(
@@ -247,7 +248,13 @@ export const CornerEditor: React.FC = () => {
     <div className="flex flex-col h-full bg-slate-900">
       <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700">
         <button
-          onClick={() => setState('preview')}
+          onClick={() => {
+            if (!processedBlob) {
+              setState('scanning')
+            } else {
+              setState('preview')
+            }
+          }}
           className="text-slate-400 hover:text-white text-sm transition-colors px-2 py-1"
         >
           Отмена

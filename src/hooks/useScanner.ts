@@ -169,9 +169,23 @@ export function useScanner(
     const imageData = ctx.getImageData(0, 0, captureCanvas.width, captureCanvas.height)
 
     setCapturedFrame(imageData)
-    setState('captured')
+    setState('preview')
 
-    // Process extraction
+    // If manual mode: don't extract yet, just use current corners or set defaults if none exist
+    if (!autoMode) {
+      if (!corners) {
+        setCorners({
+          topLeft: { x: 0.15, y: 0.2 },
+          topRight: { x: 0.85, y: 0.2 },
+          bottomRight: { x: 0.85, y: 0.8 },
+          bottomLeft: { x: 0.15, y: 0.8 },
+        })
+      }
+      setProcessedBlob(null)
+      return
+    }
+
+    // Process extraction (Auto-mode only)
     extractDocument(captureCanvas)
       .then((result) => {
         if (result.success && result.output instanceof HTMLCanvasElement) {
@@ -182,11 +196,9 @@ export function useScanner(
                 if (blob.size > 2 * 1024 * 1024) {
                   compressBlob(result.output as HTMLCanvasElement, 0.6).then((compressed) => {
                     setProcessedBlob(compressed)
-                    setState('preview')
                   })
                 } else {
                   setProcessedBlob(blob)
-                  setState('preview')
                 }
               }
             },
@@ -197,10 +209,7 @@ export function useScanner(
           // Fallback: use captured frame as-is
           captureCanvas.toBlob(
             (blob) => {
-              if (blob) {
-                setProcessedBlob(blob)
-              }
-              setState('preview')
+              if (blob) setProcessedBlob(blob)
             },
             'image/jpeg',
             0.85
@@ -211,17 +220,14 @@ export function useScanner(
         // Extraction failed, use raw frame
         captureCanvas.toBlob(
           (blob) => {
-            if (blob) {
-              setProcessedBlob(blob)
-            }
-            setState('preview')
+            if (blob) setProcessedBlob(blob)
           },
           'image/jpeg',
           0.85
         )
-        showToast('Детекция недоступна. Вы можете захватить вручную', 'warning')
+        showToast('Детекция недоступна. Вы можете настроить границы вручную', 'warning')
       })
-  }, [videoRef, setCapturedFrame, setState, setProcessedBlob, showToast])
+  }, [videoRef, autoMode, setCapturedFrame, setState, setCorners, setProcessedBlob, showToast])
 
   const processFrame = useCallback(async () => {
     const video = videoRef.current

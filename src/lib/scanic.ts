@@ -15,6 +15,14 @@ interface ScanOptions {
   minArea?: number
   epsilon?: number
   debug?: boolean
+  corners?: {
+    topLeft: Corner
+    topRight: Corner
+    bottomRight: Corner
+    bottomLeft: Corner
+  }
+  points?: number[] // [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
+  contour?: number[] // Alias for points
 }
 
 export async function initScanic(): Promise<void> {
@@ -65,7 +73,13 @@ export async function detectDocument(
 }
 
 export async function extractDocument(
-  canvas: HTMLCanvasElement
+  canvas: HTMLCanvasElement,
+  corners?: {
+    topLeft: Corner
+    topRight: Corner
+    bottomRight: Corner
+    bottomLeft: Corner
+  }
 ): Promise<ScanResult> {
   if (!initialized || !scanner) {
     throw new Error('Scanic not initialized')
@@ -78,10 +92,24 @@ export async function extractDocument(
     ): Promise<ScanResult>
   }
 
-  return s.scan(canvas, {
+  const options: ScanOptions = {
     mode: 'extract',
     output: 'canvas',
-  })
+  }
+
+  // If corners are provided, denormalize them and provide in multiple formats for robustness
+  if (corners) {
+    const tl = { x: corners.topLeft.x * canvas.width, y: corners.topLeft.y * canvas.height }
+    const tr = { x: corners.topRight.x * canvas.width, y: corners.topRight.y * canvas.height }
+    const br = { x: corners.bottomRight.x * canvas.width, y: corners.bottomRight.y * canvas.height }
+    const bl = { x: corners.bottomLeft.x * canvas.width, y: corners.bottomLeft.y * canvas.height }
+
+    options.corners = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl }
+    options.points = [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
+    options.contour = options.points
+  }
+
+  return s.scan(canvas, options)
 }
 
 export function isInitialized(): boolean {
